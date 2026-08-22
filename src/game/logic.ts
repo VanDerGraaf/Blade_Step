@@ -1,4 +1,4 @@
-import { Action, BOARD_SIZE, Personality } from "./types";
+import { ACTIONS, Action, BOARD_SIZE, Personality } from "./types";
 
 export type MoveKind = "none" | "walk" | "bump" | "leap" | "knock" | "fall";
 
@@ -51,30 +51,7 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
   const eDir = -pDir;
   const log: string[] = [];
 
-  // ---------- damage pass ----------
-  const evalStrike = (act: Action, oppAct: Action, dist: number): StrikeResult => {
-    if (act !== "strike") return "none";
-    if (oppAct === "jump") return dist <= 2 ? "antiair" : "whiff";
-    if (oppAct === "dodge") return "dodged";
-    if (oppAct === "block") return "blocked";
-    if (dist === 1) return "hit";
-    return "whiff";
-  };
-
-  let pStrike = evalStrike(pAct, eAct, dist0);
-  let eStrike = evalStrike(eAct, pAct, dist0);
-
-  // blades cross: mutual hits become a trade
-  const clash = pStrike === "hit" && eStrike === "hit";
-  if (clash) {
-    pStrike = "trade";
-    eStrike = "trade";
-  }
-
-  const dmgToE: 0 | 1 = pStrike === "hit" || pStrike === "trade" || pStrike === "antiair" ? 1 : 0;
-  const dmgToP: 0 | 1 = eStrike === "hit" || eStrike === "trade" || eStrike === "antiair" ? 1 : 0;
-
-  // ---------- movement pass (tentative) ----------
+  // ---------- movement pass (tentative, pre-knockback) ----------
   const tentative = (act: Action, pos: number, dir: number): MoveInfo => {
     switch (act) {
       case "fwd": {
@@ -97,6 +74,42 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
 
   let pMv = tentative(pAct, pPos, pDir);
   let eMv = tentative(eAct, ePos, eDir);
+
+  // ---------- damage pass ----------
+  // A strike only connects if the target is on the ADJACENT tile at the swing,
+  // or is leaping OVER the striker. A successful step-back breaks the reach.
+  const evalStrike = (
+    act: Action,
+    oppAct: Action,
+    oppMv: MoveInfo,
+    myStart: number,
+    dist: number
+  ): StrikeResult => {
+    if (act !== "strike") return "none";
+    // leaping over an adjacent striker -> cut down mid-air
+    if (oppAct === "jump") return dist === 1 ? "antiair" : "whiff";
+    // out of reach -> swing at air
+    if (dist !== 1) return "whiff";
+    // adjacent: did they step back out of range?
+    const retreated = Math.abs(oppMv.to - myStart) > dist;
+    if (retreated) return "whiff";
+    if (oppAct === "dodge") return "dodged";
+    if (oppAct === "block") return "blocked";
+    return "hit"; // they walked in / stood their ground / crossed blades
+  };
+
+  let pStrike = evalStrike(pAct, eAct, eMv, pPos, dist0);
+  let eStrike = evalStrike(eAct, pAct, pMv, ePos, dist0);
+
+  // blades cross: mutual hits become a trade
+  const clash = pStrike === "hit" && eStrike === "hit";
+  if (clash) {
+    pStrike = "trade";
+    eStrike = "trade";
+  }
+
+  const dmgToE: 0 | 1 = pStrike === "hit" || pStrike === "trade" || pStrike === "antiair" ? 1 : 0;
+  const dmgToP: 0 | 1 = eStrike === "hit" || eStrike === "trade" || eStrike === "antiair" ? 1 : 0;
 
   // knockback: striker who hit a block is pushed back 1
   if (pStrike === "blocked") pMv = move(pPos, clampPos(pPos - pDir), "knock");
@@ -196,6 +209,26 @@ function weightedPick(w: Weights, rng: () => number = Math.random): Action {
   return entries[entries.length - 1][0];
 }
 
+/** Roll a fresh hand of 6 random action dice. */
+export function rollHand(rng: () => number = Math.random): Action[] {
+  return Array.from({ length: 6 }, () => ACTIONS[Math.floor(rng() * ACTIONS.length)]);
+}
+
+/** Weighted pick constrained to the dice actually in the pool (consumes one). */
+function weightedPickFromPool(w: Weights, pool: Action[], rng: () => number = Math.random): Action {
+  if (pool.length === 0) return "fwd";
+  const avail = [...new Set(pool)];
+  const entries = avail.map((a) => [a, w[a] ?? 0] as [Action, number]).filter(([, v]) => v > 0);
+  if (entries.length === 0) return pool[Math.floor(rng() * pool.length)];
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  let roll = rng() * total;
+  for (const [a, v] of entries) {
+    roll -= v;
+    if (roll <= 0) return a;
+  }
+  return entries[entries.length - 1][0];
+}
+
 const jumpSuicide = (ePos: number, pPos: number) => {
   const dir = sign(pPos - ePos);
   const landing = ePos + 2 * dir;
@@ -262,7 +295,9 @@ function mirrorWeights(ctx: AiContext, slot: number): Weights {
   return sanitize(w, ctx);
 }
 
-export function aiPlan(pers: Personality, ctx: AiContext): Action[] {
+/** Pick 3 dice from the rolled `hand`, consuming each chosen die. */
+export function aiPlan(pers: Personality, ctx: AiContext, hand: Action[]): Action[] {
+  const pool = [...hand];
   const plan: Action[] = [];
   for (let slot = 0; slot < 3; slot++) {
     let w: Weights;
@@ -280,7 +315,10 @@ export function aiPlan(pers: Personality, ctx: AiContext): Action[] {
         w = mirrorWeights(ctx, slot);
         break;
     }
-    plan.push(weightedPick(w));
+    const pick = weightedPickFromPool(w, pool);
+    plan.push(pick);
+    const at = pool.indexOf(pick);
+    if (at >= 0) pool.splice(at, 1);
   }
   return plan;
 }

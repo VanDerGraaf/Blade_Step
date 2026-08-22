@@ -23,47 +23,61 @@ import {
 
 // ---------------------------------------------------------------- dice
 
-function ActionDie({
+function HandDie({
   action,
+  badge,
+  dimmed,
   onClick,
   disabled,
-  spent,
+  enemy,
+  delay = 0,
+  roll = true,
   hotkey,
-  active,
-  compact,
 }: {
   action: Action;
+  badge?: number | null;
+  dimmed?: boolean;
   onClick?: () => void;
   disabled?: boolean;
-  spent?: boolean;
-  hotkey?: string;
-  active?: boolean;
-  compact?: boolean;
+  enemy?: boolean;
+  delay?: number;
+  roll?: boolean;
+  hotkey?: number;
 }) {
   const m = ACTION_META[action];
   return (
     <button
       onClick={onClick}
-      disabled={disabled}
-      className={`die die-clickable no-select flex flex-col items-center justify-center gap-0.5 ${
-        compact ? "w-11 h-[52px] sm:w-14 sm:h-16" : "w-[52px] h-16 sm:w-16 sm:h-[78px]"
-      } ${spent ? "die-spent pointer-events-none" : ""} ${active ? "anim-active-step" : ""}`}
-      style={{ background: m.dark }}
+      disabled={disabled || !onClick}
+      className={`die no-select relative flex flex-col items-center justify-center gap-0.5 w-10 h-12 sm:w-11 sm:h-[52px] ${
+        roll ? "anim-dice-roll" : ""
+      } ${onClick ? "die-clickable" : ""} ${dimmed ? "opacity-35 saturate-50" : ""} ${
+        badge ? "die-chosen" : ""
+      }`}
+      style={{ background: m.dark, animationDelay: roll ? `${delay}ms` : undefined }}
       aria-label={m.name}
     >
-      <ActionIcon action={action} className={compact ? "w-5 h-5 sm:w-6 sm:h-6" : "w-6 h-6 sm:w-8 sm:h-8"} />
-      <span
-        className="font-pixel leading-none"
-        style={{ color: m.color, fontSize: compact ? 5 : 6 }}
-      >
+      {hotkey !== undefined && (
+        <span className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-[#070919] text-dim font-pixel flex items-center justify-center border border-[#39406e]"
+          style={{ fontSize: 6 }}
+        >
+          {hotkey}
+        </span>
+      )}
+      <ActionIcon action={action} className="w-5 h-5 sm:w-6 sm:h-6" />
+      <span className="font-pixel leading-none" style={{ color: m.color, fontSize: 5 }}>
         {m.short}
       </span>
-      <span className={compact ? "hidden" : "absolute -top-2 -left-2 w-4 h-4 sm:w-5 sm:h-5 bg-[#070919] text-paper font-pixel flex items-center justify-center"}
-        style={{ fontSize: 7 }}
-      >
-        {hotkey}
-      </span>
-      <span className="absolute inset-x-0 bottom-0 h-1" style={{ background: m.color, opacity: 0.85 }} />
+      {badge ? (
+        <span
+          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gold text-[#070919] font-pixel flex items-center justify-center border border-[#070919]"
+          style={{ fontSize: 7 }}
+        >
+          {badge}
+        </span>
+      ) : null}
+      {enemy && <span className="absolute inset-0 border-2 border-[#070919]/50 pointer-events-none" />}
+      <span className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: m.color, opacity: 0.85 }} />
     </button>
   );
 }
@@ -194,8 +208,9 @@ function MenuScreen({
             </h1>
             <p className="font-pixel text-[8px] md:text-[10px] text-blade mt-3 mb-1">ОДНОВРЕМЕННАЯ ДУЭЛЬ КЛИНКОВ</p>
             <p className="font-body text-[12px] md:text-[13px] text-dim mb-4 max-w-md leading-snug">
-              Шесть клеток помоста над пропастью. Выбери <span className="text-paper">3 кубика</span> — враг выберет свои втайне.
-              Кубики вскрываются по одному, и оба бойца действуют <span className="text-paper">одновременно</span>.
+              Шесть клеток помоста над пропастью. Оба бойца бросают по <span className="text-paper">6 кубиков</span> — руки открыты,
+              но каждый тайно выбирает <span className="text-paper">3</span>. Кубики вскрываются по одному, и бойцы действуют{" "}
+              <span className="text-paper">одновременно</span>.
             </p>
             <Codex />
           </div>
@@ -243,7 +258,7 @@ function MenuScreen({
               К БОЮ
             </button>
             <p className="font-body text-[10px] text-dim text-center mt-2">
-              [1–6] выбрать кубик · [Enter] бой · [Esc] пауза
+              [1–6] взять кубик из руки · [Enter] бой · [Esc] пауза
             </p>
           </div>
         </div>
@@ -326,7 +341,8 @@ export default function App() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [ui, setUi] = useState<UiSnapshot>(initialUi);
-  const [slots, setSlots] = useState<(Action | null)[]>([null, null, null]);
+  // each slot stores an index into the rolled player hand (or null)
+  const [slots, setSlots] = useState<(number | null)[]>([null, null, null]);
   const [pers, setPers] = useState<Personality>("aggressor");
   const [muted, setMutedState] = useState(isMuted());
   const [paused, setPaused] = useState(false);
@@ -337,16 +353,17 @@ export default function App() {
     return () => engine.detach();
   }, [engine]);
 
-  const selectDie = useCallback(
-    (a: Action) => {
+  const selectHandDie = useCallback(
+    (handIdx: number) => {
       if (ui.phase !== "plan") return;
+      if (handIdx < 0 || handIdx >= ui.playerHand.length) return;
       initAudio();
       setSlots((s) => {
-        const idx = s.indexOf(a);
-        if (idx >= 0) {
+        const at = s.indexOf(handIdx);
+        if (at >= 0) {
           sfx.back();
           const n = [...s];
-          n[idx] = null;
+          n[at] = null;
           return n;
         }
         const empty = s.indexOf(null);
@@ -356,11 +373,11 @@ export default function App() {
         }
         sfx.slot();
         const n = [...s];
-        n[empty] = a;
+        n[empty] = handIdx;
         return n;
       });
     },
-    [ui.phase]
+    [ui.phase, ui.playerHand]
   );
 
   const clearSlots = useCallback(() => {
@@ -369,15 +386,16 @@ export default function App() {
     setSlots([null, null, null]);
   }, [ui.phase]);
 
-  const ready = slots.every(Boolean);
+  const ready = slots.every((s) => s !== null);
 
   const fight = useCallback(() => {
     if (ui.phase !== "plan" || !ready) return;
     initAudio();
     sfx.fight();
-    engine.fight(slots.filter(Boolean) as Action[]);
+    const plan = slots.map((i) => (i === null ? "fwd" : ui.playerHand[i] ?? "fwd")) as Action[];
+    engine.fight(plan);
     setSlots([null, null, null]);
-  }, [ui.phase, ready, slots, engine]);
+  }, [ui.phase, ready, slots, ui.playerHand, engine]);
 
   const startMatch = useCallback(() => {
     initAudio();
@@ -416,7 +434,7 @@ export default function App() {
     const onKey = (ev: KeyboardEvent) => {
       if (ev.key === "Enter" && ev.target instanceof HTMLButtonElement) return; // native click handles it
       if (ev.key >= "1" && ev.key <= "6") {
-        selectDie(ACTIONS[Number(ev.key) - 1]);
+        selectHandDie(Number(ev.key) - 1);
       } else if (ev.key === "Backspace" || ev.key.toLowerCase() === "x") {
         if (ui.phase === "plan") {
           ev.preventDefault();
@@ -434,10 +452,19 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectDie, clearSlots, fight, startMatch, togglePause, toggleMute, ui.phase, ui.screen]);
+  }, [selectHandDie, clearSlots, fight, startMatch, togglePause, toggleMute, ui.phase, ui.screen]);
 
   const enemyMeta = PERSONALITIES[ui.personality];
   const inGame = ui.screen !== "menu";
+
+  const planning = ui.phase === "plan";
+  const planDisplay: (Action | null)[] = planning
+    ? slots.map((i) => (i === null ? null : ui.playerHand[i] ?? null))
+    : ui.playerPlan;
+  const badgeFor = (handIdx: number) => {
+    const at = slots.indexOf(handIdx);
+    return at >= 0 ? at + 1 : null;
+  };
 
   return (
     <div className="h-full flex flex-col arena-bg scanlines relative overflow-hidden">
@@ -518,59 +545,103 @@ export default function App() {
                 <span className="text-gold">▸</span> {ui.msg}
               </p>
               <p className="hidden md:block font-body text-[10px] text-dim/60 whitespace-nowrap">
-                [1–6] выбор · [⌫] сброс · [Enter] бой
+                [1–6] взять кубик · [⌫] сброс · [Enter] бой
               </p>
             </div>
-            <div className="flex flex-wrap items-center justify-center gap-3 md:gap-5">
-              <div className="flex items-center gap-1.5 md:gap-2">
-                <span className="font-pixel text-[7px] md:text-[8px] text-gold mr-1 whitespace-nowrap">ТВОЙ<br />ПЛАН</span>
-                {slots.map((a, i) =>
-                  a ? (
-                    <div key={`${a}-${i}`} className="anim-pop">
-                      <ActionDie action={a} onClick={() => ui.phase === "plan" && selectDie(a)} compact hotkey={String(i + 1)} />
-                    </div>
-                  ) : (
-                    <div
-                      key={`e-${i}`}
-                      className="w-11 h-[52px] sm:w-14 sm:h-16 border-[3px] border-dashed border-[#39406e] bg-ink2 flex items-center justify-center"
-                    >
-                      <span className="font-pixel text-[8px] text-[#39406e]">{i + 1}</span>
-                    </div>
-                  )
-                )}
+
+            <div className="flex flex-col gap-1.5 md:gap-2">
+              {/* ---- PLAYER: hand -> plan ---- */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 md:gap-x-3">
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold w-12 text-right whitespace-nowrap">ВЫ<br />
+                  <span className="text-[6px] text-dim">рука</span>
+                </span>
+                <div key={`ph-${ui.round}`} className="flex items-center gap-1">
+                  {ui.playerHand.map((a, i) => (
+                    <HandDie
+                      key={i}
+                      action={a}
+                      badge={planning ? badgeFor(i) : null}
+                      dimmed={planning && !slots.includes(i)}
+                      onClick={planning ? () => selectHandDie(i) : undefined}
+                      delay={i * 55}
+                      hotkey={planning ? i + 1 : undefined}
+                    />
+                  ))}
+                </div>
+                <span className="font-pixel text-[10px] text-dim px-0.5">→</span>
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold whitespace-nowrap">план</span>
+                <div className="flex items-center gap-1">
+                  {planDisplay.map((a, i) =>
+                    a ? (
+                      <div key={`${ui.round}-${i}-${a}`} className="anim-pop">
+                        <HandDie
+                          action={a}
+                          badge={i + 1}
+                          roll={false}
+                          onClick={planning && slots[i] !== null ? () => selectHandDie(slots[i] as number) : undefined}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        key={`pe-${i}`}
+                        className="w-10 h-12 sm:w-11 sm:h-[52px] border-2 border-dashed border-[#39406e] bg-ink2 flex items-center justify-center"
+                      >
+                        <span className="font-pixel text-[8px] text-[#39406e]">{i + 1}</span>
+                      </div>
+                    )
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 ml-1">
+                  <button
+                    onClick={fight}
+                    disabled={!ready || !planning}
+                    className="px-btn no-select px-4 md:px-5 py-2.5 md:py-3 bg-blood text-paper text-[11px] md:text-[12px] tracking-widest"
+                  >
+                    БОЙ!
+                  </button>
+                  <button
+                    onClick={clearSlots}
+                    className="px-btn no-select px-2 py-2.5 bg-panel text-dim text-[8px]"
+                    disabled={!planning}
+                  >
+                    СБРОС
+                  </button>
+                </div>
               </div>
-              <span className="font-pixel text-[10px] md:text-[12px] text-blood px-1">VS</span>
-              <div className="flex items-center gap-1.5 md:gap-2">
-                {[0, 1, 2].map((i) => (
-                  <FlipDie key={i} action={null} flipped={false} />
-                ))}
-                <span className="font-pixel text-[7px] md:text-[8px] text-dim ml-1 whitespace-nowrap">ЗАМЫСЕЛ<br />ВРАГА</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={fight}
-                  disabled={!ready || ui.phase !== "plan"}
-                  className="px-btn no-select px-4 md:px-6 py-3 md:py-4 bg-blood text-paper text-[11px] md:text-[13px] tracking-widest"
+
+              {/* ---- ENEMY: hand -> hidden plan ---- */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 md:gap-x-3">
+                <span
+                  className="font-pixel text-[8px] md:text-[9px] w-12 text-right whitespace-nowrap"
+                  style={{ color: enemyMeta.color }}
                 >
-                  БОЙ!
-                </button>
-                <button onClick={clearSlots} className="px-btn no-select px-2 py-3 bg-panel text-dim text-[9px]" disabled={ui.phase !== "plan"}>
-                  СБРОС
-                </button>
+                  {enemyMeta.name}
+                  <br />
+                  <span className="text-[6px] text-dim">рука</span>
+                </span>
+                <div key={`eh-${ui.round}`} className="flex items-center gap-1">
+                  {ui.enemyHand.map((a, i) => (
+                    <HandDie key={i} action={a} enemy delay={i * 55 + 40} />
+                  ))}
+                </div>
+                <span className="font-pixel text-[10px] text-dim px-0.5">→</span>
+                <span className="font-pixel text-[8px] md:text-[9px] whitespace-nowrap" style={{ color: enemyMeta.color }}>
+                  замысел
+                </span>
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="die w-10 h-12 sm:w-11 sm:h-[52px] flex items-center justify-center anim-dice-roll"
+                      style={{ background: "#3a1020", animationDelay: `${i * 55 + 200}ms` }}
+                    >
+                      <span className="font-pixel text-blood opacity-70" style={{ fontSize: 12 }}>
+                        ?
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div className="mt-1.5 md:mt-2 flex items-center justify-center gap-1.5 md:gap-2">
-              <span className="font-pixel text-[7px] md:text-[8px] text-dim mr-1 hidden sm:inline">КОЛОДА</span>
-              {ACTIONS.map((a, i) => (
-                <ActionDie
-                  key={a}
-                  action={a}
-                  onClick={() => selectDie(a)}
-                  disabled={ui.phase !== "plan"}
-                  spent={slots.includes(a)}
-                  hotkey={String(i + 1)}
-                />
-              ))}
             </div>
           </div>
         )}

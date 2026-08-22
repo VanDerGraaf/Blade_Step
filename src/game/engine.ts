@@ -9,7 +9,7 @@ import {
   Personality,
   PLAYER_START,
 } from "./types";
-import { aiPlan, resolveStep, StepResult } from "./logic";
+import { aiPlan, resolveStep, rollHand, StepResult } from "./logic";
 import { drawFighter, drawShadow, ENEMY_LOOK, PLAYER_LOOK, Pose } from "./sprites";
 import { sfx } from "./audio";
 
@@ -33,6 +33,8 @@ export interface UiSnapshot {
   enemyRevealed: number;
   enemyPlan: (Action | null)[];
   playerPlan: (Action | null)[];
+  playerHand: Action[];
+  enemyHand: Action[];
   msg: string;
   msgId: number;
   banner: string | null;
@@ -52,6 +54,8 @@ export const initialUi: UiSnapshot = {
   enemyRevealed: 0,
   enemyPlan: [null, null, null],
   playerPlan: [null, null, null],
+  playerHand: [],
+  enemyHand: [],
   msg: "Выбери соперника и выйди на помост",
   msgId: 0,
   banner: null,
@@ -154,6 +158,8 @@ export class Engine {
 
   private pPlan: Action[] = [];
   private ePlan: Action[] = [];
+  private playerHand: Action[] = [];
+  private enemyHand: Action[] = [];
   private round = 1;
   private histTotal: Partial<Record<Action, number>> = {};
   private histFirst: Partial<Record<Action, number>> = {};
@@ -292,14 +298,19 @@ export class Engine {
   }
 
   private startExchange(tok: number) {
+    this.playerHand = rollHand();
+    this.enemyHand = rollHand();
     this.patch({
       phase: "plan",
       step: -1,
       enemyRevealed: 0,
       enemyPlan: [null, null, null],
       playerPlan: [null, null, null],
+      playerHand: [...this.playerHand],
+      enemyHand: [...this.enemyHand],
       round: this.round,
     });
+    sfx.rattle();
     this.p.holdPose = false;
     this.e.holdPose = false;
     void tok;
@@ -309,17 +320,20 @@ export class Engine {
     await this.wait(750, tok);
     if (tok !== this.token) return;
 
-    const dist = Math.abs(this.e.pos - this.p.pos);
-    this.ePlan = aiPlan(this.ui.personality, {
-      ePos: this.e.pos,
-      pPos: this.p.pos,
-      pHp: this.p.hp,
-      eHp: this.e.hp,
-      round: this.round,
-      histTotal: this.histTotal,
-      histFirst: this.histFirst,
-      samples: this.samples,
-    });
+    this.ePlan = aiPlan(
+      this.ui.personality,
+      {
+        ePos: this.e.pos,
+        pPos: this.p.pos,
+        pHp: this.p.hp,
+        eHp: this.e.hp,
+        round: this.round,
+        histTotal: this.histTotal,
+        histFirst: this.histFirst,
+        samples: this.samples,
+      },
+      this.enemyHand
+    );
 
     // record player habits AFTER the AI picks (mirror reads history, not telepathy)
     for (let i = 0; i < 3; i++) {
