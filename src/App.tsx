@@ -84,14 +84,14 @@ function HandDie({
 
 function FlipDie({
   action,
-  flipped,
+  revealed,
   active,
   done,
   big,
   backColor = "#232b4d",
 }: {
   action: Action | null;
-  flipped: boolean;
+  revealed: boolean; // true = action face is up, false = hidden "?" face is up
   active?: boolean;
   done?: boolean;
   big?: boolean;
@@ -104,7 +104,7 @@ function FlipDie({
         done ? "opacity-35 saturate-50" : ""
       } ${active ? "anim-active-step" : ""}`}
     >
-      <div className={`die-flip-inner ${flipped ? "flipped" : ""}`}>
+      <div className={`die-flip-inner ${revealed ? "" : "flipped"}`}>
         <div className="die-face die flex flex-col items-center justify-center gap-1" style={{ background: m ? m.dark : "#1c2244" }}>
           {m && action && (
             <>
@@ -665,7 +665,7 @@ export default function App() {
                 <span className="font-pixel text-[8px] md:text-[9px] text-gold mr-1 mt-3 sm:mt-4 whitespace-nowrap">ВЫ</span>
                 {ui.playerPlan.map((a, i) => (
                   <div key={i} className="flex flex-col items-center gap-1">
-                    <FlipDie action={a} flipped big active={ui.step === i} done={ui.step > i} />
+                    <FlipDie action={a} revealed big active={ui.step === i} done={ui.step > i} />
                     <span
                       className={`font-pixel leading-none ${ui.step === i ? "text-gold" : "text-[#39406e]"}`}
                       style={{ fontSize: 8 }}
@@ -681,7 +681,7 @@ export default function App() {
                   <div key={i} className="flex flex-col items-center gap-1">
                     <FlipDie
                       action={a}
-                      flipped={i < ui.enemyRevealed}
+                      revealed={i < ui.enemyRevealed}
                       big
                       active={ui.step === i}
                       done={ui.step > i}
