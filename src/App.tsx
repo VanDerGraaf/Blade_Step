@@ -205,6 +205,10 @@ interface NetPanelProps {
   onCreate: () => void;
   onJoin: () => void;
   onCancel: () => void;
+  serverLabel: string;
+  serverInput: string;
+  setServerInput: (v: string) => void;
+  onApplyServer: () => void;
 }
 
 function MenuScreen({
@@ -331,6 +335,31 @@ function MenuScreen({
                   ДВЕ ВКЛАДКИ
                 </button>
               </div>
+
+              {netPanel.transport === "online" && netPanel.state === "off" && (
+                <div className="mb-1.5">
+                  <div className="flex items-center gap-1">
+                    <span className="font-pixel text-[7px] text-dim whitespace-nowrap">СЕРВЕР</span>
+                    <input
+                      value={netPanel.serverInput}
+                      onChange={(e) => netPanel.setServerInput(e.target.value)}
+                      placeholder={netPanel.serverLabel}
+                      className="font-body flex-1 min-w-0 px-2 py-1 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[10px] outline-none focus:border-[#3ddad7]"
+                    />
+                    <button
+                      onClick={netPanel.onApplyServer}
+                      className="px-btn no-select px-2 py-1 bg-ink2 text-dim text-[7px]"
+                    >
+                      OK
+                    </button>
+                  </div>
+                  <p className="font-body text-[8px] text-dim/70 mt-0.5 leading-tight">
+                    Знакомство: <span className="text-[#3ddad7]">{netPanel.serverLabel}</span>. Если облако закрыто — запустите{" "}
+                    <span className="text-paper">npx peerjs --port 9000</span> на одной машине и введите её{" "}
+                    <span className="text-paper">IP:9000</span> (дуэль по локальной сети, работает без интернета).
+                  </p>
+                </div>
+              )}
 
               {netPanel.state === "off" && (
                 <div className="flex flex-col gap-1.5">
@@ -526,6 +555,11 @@ export default function App() {
   const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
   const [netTransport, setNetTransport] = useState<Transport>("online");
   const [roomCode, setRoomCode] = useState("");
+  const [serverInput, setServerInput] = useState("");
+  const [serverLabel, setServerLabel] = useState(() => {
+    const c = net.getCustomServer();
+    return c ? `${c.host}:${c.port}` : "0.peerjs.com (облако)";
+  });
   const [joinCode, setJoinCode] = useState("");
   const [netPeerName, setNetPeerName] = useState("Соперник");
   const [netError, setNetError] = useState("");
@@ -740,6 +774,14 @@ export default function App() {
     else net.joinOnline(code);
     setNetState("joining");
   }, [joinCode, netTransport]);
+
+  /** Свой сигнальный сервер: «host:port», пусто — сброс на облако 0.peerjs.com. */
+  const applyServer = useCallback(() => {
+    const c = net.setCustomServer(serverInput);
+    setServerLabel(c ? `${c.host}:${c.port}` : "0.peerjs.com (облако)");
+    setServerInput("");
+    sfx.tick();
+  }, [serverInput]);
 
   const cancelNet = useCallback(() => {
     net.send({ t: "quit" });
@@ -1140,6 +1182,10 @@ export default function App() {
             onCreate: createRoom,
             onJoin: joinRoom,
             onCancel: cancelNet,
+            serverLabel,
+            serverInput,
+            setServerInput,
+            onApplyServer: applyServer,
           }}
         />
       )}

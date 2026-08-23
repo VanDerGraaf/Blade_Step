@@ -46,10 +46,29 @@ function randCode(): string {
   return s;
 }
 
-const ONLINE_FAIL_HINT =
-  "Не удалось связаться с сервером знакомств PeerJS (0.peerjs.com). " +
+// ---- пользовательский сигнальный сервер (npx peerjs --port 9000) ----
+const LS_SERVER = "bladestep-server";
+export interface ServerCfg {
+  host: string;
+  port: number;
+}
+
+function loadCustomServer(): ServerCfg | null {
+  try {
+    const raw = localStorage.getItem(LS_SERVER);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as ServerCfg;
+    if (p && typeof p.host === "string" && p.host && typeof p.port === "number") return p;
+  } catch {
+    /* noop */
+  }
+  return null;
+}
+
+const onlineFailHint = (server: string) =>
+  `Не удалось связаться с сервером знакомств (${server}). ` +
   "Причины: нет интернета, сервер недоступен из вашей сети или среда блокирует внешние соединения. " +
-  "Попробуйте режим «ДВЕ ВКЛАДКИ» — он работает без серверов.";
+  "Выход: режим «ДВЕ ВКЛАДКИ» (без серверов) или свой сервер — npx peerjs --port 9000.";
 
 type LMsg =
   | { k: "hello-host"; code: string; from: string }
@@ -75,8 +94,38 @@ class NetSession {
   private attempts = 0;
   private pendingHostCode = "";
   private pendingJoinCode = "";
+  private custom: ServerCfg | null = loadCustomServer();
   transport: Transport = "online";
   isHost = false;
+
+  /** Текущий сигнальный сервер (null = публичное облако 0.peerjs.com). */
+  getCustomServer(): ServerCfg | null {
+    return this.custom;
+  }
+
+  /** Задать свой сервер из строки «host:port» (порт по умолчанию 9000). Пустая строка — сброс на облако. */
+  setCustomServer(raw: string): ServerCfg | null {
+    const t = raw.trim();
+    if (!t) {
+      this.custom = null;
+      try {
+        localStorage.removeItem(LS_SERVER);
+      } catch {
+        /* noop */
+      }
+      return null;
+    }
+    const [host, portStr] = t.split(":");
+    const port = portStr ? parseInt(portStr, 10) : 9000;
+    if (!host || Number.isNaN(port) || port <= 0 || port > 65535) return this.custom;
+    this.custom = { host, port };
+    try {
+      localStorage.setItem(LS_SERVER, JSON.stringify(this.custom));
+    } catch {
+      /* noop */
+    }
+    return this.custom;
+  }
 
   get connected(): boolean {
     return this.transport === "local" ? this.localConnected : this.conn?.open ?? false;
@@ -132,7 +181,16 @@ class NetSession {
     try {
       this.peer?.destroy();
     } catch { /* noop */ }
-    this.peer = id ? new Peer(id, PEER_CONFIG) : new Peer(PEER_CONFIG);
+    const opts = this.custom
+      ? {
+          ...PEER_CONFIG,
+          host: this.custom.host,
+          port: this.custom.port,
+          path: "/",
+          secure: false,
+        }
+      : PEER_CONFIG;
+    this.peer = id ? new Peer(id, opts) : new Peer(opts);
     this.peer.on("open", onOpen);
     this.peer.on("disconnected", () => {
       try {
@@ -191,7 +249,8 @@ class NetSession {
     if (t === "peer-unavailable") {
       this.hooks?.onError("Комната с таким кодом не найдена. Проверьте код.");
     } else {
-      this.hooks?.onError(ONLINE_FAIL_HINT);
+      const srv = this.custom ? `${this.custom.host}:${this.custom.port}` : "0.peerjs.com";
+      this.hooks?.onError(onlineFailHint(srv));
     }
     this.softReset();
   }
