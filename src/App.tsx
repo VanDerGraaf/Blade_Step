@@ -87,27 +87,29 @@ function FlipDie({
   flipped,
   active,
   done,
+  big,
   backColor = "#232b4d",
 }: {
   action: Action | null;
   flipped: boolean;
   active?: boolean;
   done?: boolean;
+  big?: boolean;
   backColor?: string;
 }) {
   const m = action ? ACTION_META[action] : null;
   return (
     <div
-      className={`die-flip w-[52px] h-16 sm:w-16 sm:h-[78px] ${done ? "opacity-35 saturate-50" : ""} ${
-        active ? "anim-active-step" : ""
-      }`}
+      className={`die-flip ${big ? "w-14 h-[68px] sm:w-[76px] sm:h-[92px]" : "w-[52px] h-16 sm:w-16 sm:h-[78px]"} ${
+        done ? "opacity-35 saturate-50" : ""
+      } ${active ? "anim-active-step" : ""}`}
     >
       <div className={`die-flip-inner ${flipped ? "flipped" : ""}`}>
         <div className="die-face die flex flex-col items-center justify-center gap-1" style={{ background: m ? m.dark : "#1c2244" }}>
           {m && action && (
             <>
-              <ActionIcon action={action} className="w-7 h-7 sm:w-8 sm:h-8" />
-              <span className="font-pixel leading-none" style={{ color: m.color, fontSize: 6 }}>
+              <ActionIcon action={action} className={big ? "w-8 h-8 sm:w-10 sm:h-10" : "w-7 h-7 sm:w-8 sm:h-8"} />
+              <span className="font-pixel leading-none" style={{ color: m.color, fontSize: big ? 7 : 6 }}>
                 {m.short}
               </span>
             </>
@@ -648,7 +650,7 @@ export default function App() {
 
         {inGame && (ui.phase === "resolve" || ui.phase === "ko") && (
           <div className="mx-auto max-w-4xl">
-            <div className="flex items-center justify-between gap-3 min-h-[18px] mb-1.5">
+            <div className="flex items-center justify-between gap-3 min-h-[18px] mb-1">
               <p key={ui.msgId} className="anim-msg font-body text-[11px] md:text-[12px] text-dim truncate">
                 <span className="text-gold">▸</span> {ui.msg}
               </p>
@@ -658,19 +660,45 @@ export default function App() {
                 </span>
               )}
             </div>
-            <div className="flex items-center justify-center gap-2 md:gap-6">
-              <div className="flex items-center gap-1.5 md:gap-2">
-                <span className="font-pixel text-[7px] md:text-[8px] text-gold mr-1">ВЫ</span>
+            <div className="flex items-start justify-center gap-3 md:gap-10">
+              <div className="flex items-start gap-1.5 md:gap-2">
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold mr-1 mt-3 sm:mt-4 whitespace-nowrap">ВЫ</span>
                 {ui.playerPlan.map((a, i) => (
-                  <FlipDie key={i} action={a} flipped active={ui.step === i} done={ui.step > i} />
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <FlipDie action={a} flipped big active={ui.step === i} done={ui.step > i} />
+                    <span
+                      className={`font-pixel leading-none ${ui.step === i ? "text-gold" : "text-[#39406e]"}`}
+                      style={{ fontSize: 8 }}
+                    >
+                      {i + 1}
+                    </span>
+                  </div>
                 ))}
               </div>
-              <span className="font-pixel text-[10px] md:text-[12px] text-blood">VS</span>
-              <div className="flex items-center gap-1.5 md:gap-2">
+              <span className="font-pixel text-[12px] md:text-[14px] text-blood mt-4 sm:mt-6">VS</span>
+              <div className="flex items-start gap-1.5 md:gap-2">
                 {ui.enemyPlan.map((a, i) => (
-                  <FlipDie key={i} action={a} flipped={i < ui.enemyRevealed} active={ui.step === i} done={ui.step > i} backColor="#3a1020" />
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <FlipDie
+                      action={a}
+                      flipped={i < ui.enemyRevealed}
+                      big
+                      active={ui.step === i}
+                      done={ui.step > i}
+                      backColor="#3a1020"
+                    />
+                    <span
+                      className={`font-pixel leading-none ${ui.step === i ? "text-blood" : "text-[#39406e]"}`}
+                      style={{ fontSize: 8 }}
+                    >
+                      {i + 1}
+                    </span>
+                  </div>
                 ))}
-                <span className="font-pixel text-[7px] md:text-[8px] ml-1" style={{ color: enemyMeta.color }}>
+                <span
+                  className="font-pixel text-[8px] md:text-[9px] ml-1 mt-3 sm:mt-4 whitespace-nowrap"
+                  style={{ color: enemyMeta.color }}
+                >
                   {enemyMeta.name}
                 </span>
               </div>

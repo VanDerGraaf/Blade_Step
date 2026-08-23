@@ -311,6 +311,8 @@ export class Engine {
       round: this.round,
     });
     sfx.rattle();
+    this.banner(`РАУНД ${this.round}`, tok);
+    sfx.banner();
     this.p.holdPose = false;
     this.e.holdPose = false;
     void tok;
@@ -356,8 +358,7 @@ export class Engine {
     }
 
     this.patch({ phase: "resolve" });
-    this.banner("КЛИНКИ РЕШАЮТ", tok);
-    await this.wait(650, tok);
+    await this.wait(320, tok);
     if (tok !== this.token) return;
 
     for (let i = 0; i < outcomes.length; i++) {
@@ -384,9 +385,7 @@ export class Engine {
       enemyPlan: this.ePlan.map((a, k) => (k <= i ? a : null)),
     });
     sfx.reveal();
-    this.banner(`ШАГ ${i + 1}`, tok);
-    sfx.banner();
-    await this.wait(520, tok);
+    await this.wait(430, tok);
     if (tok !== this.token) return;
 
     const P = this.p;
