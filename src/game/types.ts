@@ -1,7 +1,29 @@
-/** wait — внутреннее действие «ничего не делать» (тайм-аут в сетевой игре). */
-export type Action = "fwd" | "back" | "jump" | "dodge" | "strike" | "block" | "wait";
+/**
+ * wait   — внутреннее действие «ничего не делать» (тайм-аут в сетевой игре).
+ * roll   — Перекат (Шиноби): рывок на 2 клетки понизу, неуязвим, проскальзывает под врагом.
+ * cleave — Рассечение (Они): удар на 2 урона, мажет по прыгающим.
+ * bash   — Удар щитом (Страж): при вашей атаке гасит её, вы получаете 1 урон и отлетаете.
+ * reflect— Отражение (Кицунэ): при вашей атаке гасит её, вы получаете 1 урон.
+ */
+export type Action =
+  | "fwd" | "back" | "jump" | "dodge" | "strike" | "block" | "wait"
+  | "roll" | "cleave" | "bash" | "reflect";
 
-export const ACTIONS: Exclude<Action, "wait">[] = ["fwd", "back", "jump", "dodge", "strike", "block"];
+/** Колода игрока-ронина. */
+export const ACTIONS: Action[] = ["fwd", "back", "jump", "dodge", "strike", "block"];
+
+/** Особые грани врагов (вне колоды игрока). */
+export const SPECIAL_ACTIONS: Action[] = ["roll", "cleave", "bash", "reflect"];
+
+/** Наборы кубиков: из этих граней каждый боец бросает свою руку (6 кубиков). */
+export const DICE_POOLS: Record<Personality | "ronin", Action[]> = {
+  random: ["fwd", "back", "dodge", "strike"],
+  aggressor: ["fwd", "back", "jump", "block", "strike", "cleave"],
+  controller: ["fwd", "back", "dodge", "strike", "block", "bash"],
+  mirror: ["fwd", "back", "jump", "dodge", "strike", "reflect"],
+  shadow: ["fwd", "back", "roll", "dodge", "strike", "block"],
+  ronin: ACTIONS,
+};
 
 export interface ActionMeta {
   name: string;
@@ -34,7 +56,7 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     short: "ПРЫЖОК",
     color: "#3ddad7",
     dark: "#0e6b69",
-    desc: "Рывок на 2 клетки. С дистанции 1 перелетаешь врага за спину. В полёте уязвим для удара!",
+    desc: "Рывок на 2 клетки. С дистанции 1 перелетаешь врага за спину. В полёте уязвим: попадание — КРИТ (2 урона)!",
     tip: "За краем арены — падение в пропасть.",
   },
   dodge: {
@@ -50,7 +72,7 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     short: "УДАР",
     color: "#ff5964",
     dark: "#8a1f2b",
-    desc: "1 урон по клетке перед собой. Обоюдный удар — урон получат оба. По блоку — отскочишь.",
+    desc: "1 урон по клетке перед собой. Обоюдный удар — урон получат оба. По прыгающему — КРИТ (2 урона). По перекату — свист.",
     tip: "Достаёт только в упор или перелетающего врага.",
   },
   block: {
@@ -58,7 +80,7 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     short: "БЛОК",
     color: "#aebbdd",
     dark: "#4a5578",
-    desc: "Гасит удар и отбрасывает атакующего назад. Бесполезен против прыжка.",
+    desc: "Гасит удар и отбрасывает атакующего назад. Бесполезен против прыжка. Держит Перекат Шиноби.",
     tip: "Ставь первым, контратакуй вторым.",
   },
   wait: {
@@ -69,28 +91,61 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     desc: "Боец застыл без действия — время на план вышло.",
     tip: "Не успел за 20 секунд — стоишь и ждёшь.",
   },
+  roll: {
+    name: "Перекат",
+    short: "ПЕРЕКАТ",
+    color: "#7ee081",
+    dark: "#1f6b33",
+    desc: "Рывок на 2 клетки понизу. Неуязвим: по перекату нельзя попасть. С дистанции 1 проскальзывает под врагом за спину. Упирается в блок — отскакивает.",
+    tip: "Грань Шиноби. Лечится блоком и зажимом у края.",
+  },
+  cleave: {
+    name: "Рассечение",
+    short: "РАССЕЧ",
+    color: "#ff8c42",
+    dark: "#8a3d14",
+    desc: "Мощный удар на 2 урона. Достаёт только в упор и только по наземной цели — прыгающий улетает целым.",
+    tip: "Грань Кровожада. Прыгай — и она свистнет мимо.",
+  },
+  bash: {
+    name: "Удар щитом",
+    short: "ЩИТ",
+    color: "#e9c46a",
+    dark: "#8a6d1f",
+    desc: "Если в этот шаг по стражу бьют: удар гасится, атакующий получает 1 урон и отлетает назад. Если не бьют — грань потрачена зря.",
+    tip: "Грань Стража. Не ведись — выманивай.",
+  },
+  reflect: {
+    name: "Отражение",
+    short: "ЗЕРКАЛО",
+    color: "#c77dff",
+    dark: "#5b2a8a",
+    desc: "Если в этот шаг по кицунэ бьют: удар гасится, атакующий получает 1 урон. Не бьют — грань свистит в пустоту.",
+    tip: "Грань Зеркала. Блефуй и трать её впустую.",
+  },
 };
 
-export type Personality = "random" | "aggressor" | "controller" | "mirror";
+export type Personality = "random" | "aggressor" | "controller" | "mirror" | "shadow";
 
 /** Visual design of each enemy, tied to its AI personality. */
-export type EnemyKind = "scarecrow" | "oni" | "guard" | "kitsune";
+export type EnemyKind = "scarecrow" | "oni" | "guard" | "kitsune" | "shinobi";
 
 export const PERSONALITY_KIND: Record<Personality, EnemyKind> = {
   random: "scarecrow",
   aggressor: "oni",
   controller: "guard",
   mirror: "kitsune",
+  shadow: "shinobi",
 };
 
-export const ENEMY_KINDS: EnemyKind[] = ["scarecrow", "oni", "guard", "kitsune"];
+export const ENEMY_KINDS: EnemyKind[] = ["scarecrow", "oni", "guard", "kitsune", "shinobi"];
 
 export interface PersonalityMeta {
   name: string;
   title: string;
   color: string;
   quote: string;
-  threat: number; // 1..4
+  threat: number; // 1..5
 }
 
 export const PERSONALITIES: Record<Personality, PersonalityMeta> = {
@@ -118,11 +173,25 @@ export const PERSONALITIES: Record<Personality, PersonalityMeta> = {
   mirror: {
     name: "ЗЕРКАЛО",
     title: "Чтец привычек",
-    color: "#b08cff",
+    color: "#c77dff",
     quote: "«Я уже видел этот ход»",
     threat: 4,
   },
+  shadow: {
+    name: "ШИНОБИ",
+    title: "Тень",
+    color: "#7ee081",
+    quote: "«Ты бьёшь там, где меня уже нет»",
+    threat: 4,
+  },
 };
+
+// ---------- арена и матч ----------
+
+export const BOARD_SIZE = 6;
+export const PLAYER_START = 1;
+export const ENEMY_START = 4;
+export const MAX_HP = 3;
 
 export type GameResult = "win" | "lose" | "draw";
 
@@ -135,8 +204,3 @@ export interface MatchStats {
   whiffs: number;
   leaps: number;
 }
-
-export const BOARD_SIZE = 6;
-export const PLAYER_START = 1;
-export const ENEMY_START = 4;
-export const MAX_HP = 3;

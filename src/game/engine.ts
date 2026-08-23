@@ -1,6 +1,7 @@
 import {
   Action,
   BOARD_SIZE,
+  DICE_POOLS,
   ENEMY_START,
   GameResult,
   MatchStats,
@@ -350,13 +351,13 @@ export class Engine {
   private startExchange(tok: number) {
     this.planCommitted = false;
     this.netEnemyPlan = null;
-    this.playerHand = rollHand();
+    this.playerHand = rollHand(DICE_POOLS.ronin);
     if (this.mode === "net") {
       // свою руку показываем сопернику; его руку получим по сети
       this.netSend({ t: "hand", hand: [...this.playerHand] });
       this.enemyHand = [...this.netEnemyHand];
     } else {
-      this.enemyHand = rollHand();
+      this.enemyHand = rollHand(DICE_POOLS[this.ui.personality]);
     }
     this.patch({
       phase: "plan",
@@ -497,10 +498,10 @@ export class Engine {
     const E = this.e;
 
     // stats
-    if (r.pMove.kind === "leap") this.stats.leaps++;
-    if (r.eStrike === "blocked") this.stats.blocks++;
-    if (r.eStrike === "dodged") this.stats.dodges++;
-    if (r.pStrike === "whiff") this.stats.whiffs++;
+    if (r.pMove.kind === "leap" || r.pMove.kind === "roll") this.stats.leaps++;
+    if (r.eStrike === "blocked" || r.eStrike === "bashed" || r.eStrike === "reflected") this.stats.blocks++;
+    if (r.eStrike === "dodged" || r.eStrike === "rolled") this.stats.dodges++;
+    if (r.pStrike === "whiff" || r.pStrike === "rolled") this.stats.whiffs++;
 
     // --- launch movement animations ---
     this.animateMove(P, r, "p", tok);
@@ -563,11 +564,19 @@ export class Engine {
     if (a === "block") {
       this.setPose(f, "block", 700);
       f.holdPose = true;
+    } else if (a === "bash") {
+      this.setPose(f, "block", 700); // щит вверх
+      f.holdPose = true;
+    } else if (a === "reflect") {
+      this.setPose(f, "dodge", 620); // зеркальная стойка
+      sfx.dodge();
+      this.ghostBurst(f);
     } else if (a === "dodge") {
       this.setPose(f, "dodge", 620);
       sfx.dodge();
       this.ghostBurst(f);
     }
+    // roll: поза ставится в animateMove (knock-отскок уже дал «hurt»)
   }
 
   private animateMove(f: Fighter, r: StepResult, who: "p" | "e", tok: number) {
@@ -618,6 +627,29 @@ export class Engine {
         });
         break;
       }
+      case "roll": {
+        // низкий рывок понизу: призрак-шлейф + клубы пыли
+        sfx.dodge();
+        sfx.whoosh();
+        this.setPose(f, "roll", 420);
+        const fromX = tileCenter(mv.from);
+        const toX = tileCenter(mv.to);
+        const dir = Math.sign(toX - fromX) || 1;
+        this.dust(f.x, GROUND_Y, 6, 0.7);
+        let ghosts = 0;
+        this.tween(300, (t) => {
+          f.x = fromX + (toX - fromX) * t;
+          if (ghosts < 5 && Math.floor(t * 5) > ghosts) {
+            ghosts = Math.floor(t * 5);
+            this.ghostAt(f.x - dir * 10, GROUND_Y, -dir, "#7ee081");
+            this.dust(f.x - dir * 14, GROUND_Y, 2, 0.5);
+          }
+        }, easeInOut, tok).then(() => {
+          if (f.pose === "roll") f.pose = "idle";
+          this.dust(f.x, GROUND_Y, 5, 0.6);
+        });
+        break;
+      }
       case "knock": {
         this.setPose(f, "hurt", 420);
         f.flash = 0.6;
@@ -659,16 +691,17 @@ export class Engine {
     const E = this.e;
     const mid = { x: (P.x + E.x) / 2, y: GROUND_Y - 52 - Math.max(P.air, E.air) * 0.4 };
 
-    const hitFx = (victim: Fighter, color: string) => {
+    const hitFx = (victim: Fighter, color: string, amount: number) => {
       victim.flash = 1;
       this.setPose(victim, "hurt", 420);
       const vy = GROUND_Y - victim.air - 44;
-      this.sparks(victim.x, vy, 14, color);
-      this.textPop(victim.x, vy - 34, "-1", "#ff5964");
+      this.sparks(victim.x, vy, 10 + amount * 6, color);
+      this.textPop(victim.x, vy - 34, `-${amount}`, "#ff5964");
       sfx.thud();
-      this.shake(0.55);
-      this.flashA = Math.max(this.flashA, 0.16);
-      this.hitstop(0.22, 110, tok);
+      if (amount > 1) sfx.ko(); // тяжёлое попадание
+      this.shake(0.4 + amount * 0.18);
+      this.flashA = Math.max(this.flashA, 0.12 + amount * 0.06);
+      this.hitstop(0.22, 90 + amount * 30, tok);
     };
 
     // clash — blades cross at midpoint
@@ -683,18 +716,61 @@ export class Engine {
     }
 
     if (r.dmgToE) {
-      if (r.pStrike === "antiair") this.textPop(E.x, GROUND_Y - E.air - 96, "В ПОЛЁТЕ!", "#3ddad7");
-      hitFx(E, "#ff5964");
-      E.hp = Math.max(0, E.hp - 1);
-      this.stats.dealt++;
+      if (r.pStrike === "antiair") {
+        this.textPop(E.x, GROUND_Y - E.air - 100, "КРИТ!", "#ffc24b");
+        this.textPop(E.x, GROUND_Y - E.air - 78, "в полёте", "#3ddad7");
+      }
+      if (r.pStrike === "hit" && this.pPlan[this.ui.step] === "cleave")
+        this.textPop(E.x, GROUND_Y - E.air - 78, "РАССЕЧЕНИЕ", "#ff8c42");
+      hitFx(E, "#ff5964", r.dmgToE);
+      E.hp = Math.max(0, E.hp - r.dmgToE);
+      this.stats.dealt += r.dmgToE;
     }
     if (r.dmgToP) {
-      if (r.eStrike === "antiair") this.textPop(P.x, GROUND_Y - P.air - 96, "В ПОЛЁТЕ!", "#3ddad7");
-      hitFx(P, "#ff8c42");
-      P.hp = Math.max(0, P.hp - 1);
-      this.stats.taken++;
+      if (r.eStrike === "antiair") {
+        this.textPop(P.x, GROUND_Y - P.air - 100, "КРИТ!", "#ffc24b");
+        this.textPop(P.x, GROUND_Y - P.air - 78, "в полёте", "#3ddad7");
+      }
+      if (r.eStrike === "hit" && this.ePlan[this.ui.step] === "cleave")
+        this.textPop(P.x, GROUND_Y - P.air - 78, "РАССЕЧЕНИЕ", "#ff8c42");
+      hitFx(P, "#ff8c42", r.dmgToP);
+      P.hp = Math.max(0, P.hp - r.dmgToP);
+      this.stats.taken += r.dmgToP;
     }
     if (r.dmgToE || r.dmgToP) this.patch({ pHp: P.hp, eHp: E.hp, stats: { ...this.stats } });
+
+    // удар щитом: атакующий отлетает и получает урон (урон уже учтён в dmgToP/dmgToE)
+    if (r.pStrike === "bashed") {
+      this.blockRing(E, "#e9c46a");
+      sfx.block();
+      sfx.clang();
+      this.sparks(P.x + P.facing * 20, GROUND_Y - 50, 12, "#e9c46a");
+      this.textPop(E.x, GROUND_Y - 112, "ЩИТ!", "#e9c46a");
+      this.shake(0.5);
+    }
+    if (r.eStrike === "bashed") {
+      this.blockRing(P, "#e9c46a");
+      sfx.block();
+      sfx.clang();
+      this.sparks(E.x + E.facing * 20, GROUND_Y - 50, 12, "#e9c46a");
+      this.textPop(P.x, GROUND_Y - 112, "ЩИТ!", "#e9c46a");
+      this.shake(0.5);
+    }
+    // отражение: зеркальная вспышка
+    if (r.pStrike === "reflected") {
+      this.blockRing(E, "#c77dff");
+      sfx.reflect();
+      this.sparks(P.x, GROUND_Y - 60, 12, "#c77dff");
+      this.textPop(E.x, GROUND_Y - 112, "ЗЕРКАЛО", "#c77dff");
+      this.shake(0.4);
+    }
+    if (r.eStrike === "reflected") {
+      this.blockRing(P, "#c77dff");
+      sfx.reflect();
+      this.sparks(E.x, GROUND_Y - 60, 12, "#c77dff");
+      this.textPop(P.x, GROUND_Y - 112, "ЗЕРКАЛО", "#c77dff");
+      this.shake(0.4);
+    }
 
     // blocked strike -> clang + ring on blocker
     if (r.pStrike === "blocked") {
@@ -717,6 +793,9 @@ export class Engine {
     // dodged
     if (r.pStrike === "dodged") this.textPop(E.x, GROUND_Y - 104, "МИМО", "#b08cff");
     if (r.eStrike === "dodged") this.textPop(P.x, GROUND_Y - 104, "МИМО", "#b08cff");
+    // ушёл перекатом — клинок рассёк пустоту над спиной
+    if (r.pStrike === "rolled") this.textPop(E.x, GROUND_Y - 96, "ПЕРЕКАТ", "#7ee081");
+    if (r.eStrike === "rolled") this.textPop(P.x, GROUND_Y - 96, "ПЕРЕКАТ", "#7ee081");
     if (r.pStrike === "whiff") this.textPop(P.x + P.facing * 46, GROUND_Y - 84, "свист", "#8f96c4");
     if (r.eStrike === "whiff") this.textPop(E.x + E.facing * 46, GROUND_Y - 84, "свист", "#8f96c4");
   }
@@ -867,6 +946,23 @@ export class Engine {
       });
   }
 
+  /** Призрачный шлейф в точке (для переката). */
+  private ghostAt(x: number, y: number, dir: number, color: string) {
+    for (let i = 0; i < 4; i++)
+      this.particles.push({
+        x: x + dir * i * 6,
+        y: y - 12 - i * 9,
+        vx: dir * 46,
+        vy: 0,
+        g: 0,
+        life: 0,
+        max: 260,
+        size: 4,
+        color,
+        kind: "rect",
+      });
+  }
+
   private textPop(x: number, y: number, text: string, color: string) {
     this.particles.push({ x, y, vx: 0, vy: -46, g: -20, life: 0, max: 780, size: 13, color, kind: "text", text });
   }
@@ -892,7 +988,7 @@ export class Engine {
     }
   }
 
-  private blockRing(f: Fighter) {
+  private blockRing(f: Fighter, color = "#aebbdd") {
     for (let i = 0; i < 10; i++) {
       const a = -1.2 + (i / 9) * 2.4;
       this.particles.push({
@@ -904,7 +1000,7 @@ export class Engine {
         life: 0,
         max: 260,
         size: 3,
-        color: "#aebbdd",
+        color,
         kind: "rect",
       });
     }

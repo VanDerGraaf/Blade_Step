@@ -86,6 +86,10 @@ function noise({ dur, vol = 0.2, type = "highpass", f0 = 1200, f1, delay = 0, q 
 
 export const sfx = {
   select: () => tone({ f0: 660, f1: 990, dur: 0.07, vol: 0.12 }),
+  reflect: () => {
+    tone({ f0: 1320, f1: 1980, dur: 0.16, vol: 0.1, type: "triangle" });
+    tone({ f0: 880, f1: 660, dur: 0.22, vol: 0.08, type: "sine" });
+  },
   slot: () => {
     tone({ f0: 300, f1: 180, dur: 0.08, vol: 0.16, type: "triangle" });
     noise({ dur: 0.05, vol: 0.08, f0: 2400 });

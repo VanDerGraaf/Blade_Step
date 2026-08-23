@@ -1,9 +1,9 @@
 // Detailed procedural pixel-art fighters on an 18x24 grid (4px cells).
 // One shared humanoid skeleton; each kind adds its own head, torso, gear and weapon.
 
-export type Pose = "idle" | "walk" | "leap" | "strike" | "dodge" | "block" | "hurt" | "ko";
+export type Pose = "idle" | "walk" | "leap" | "roll" | "strike" | "dodge" | "block" | "hurt" | "ko";
 
-export type FighterKind = "ronin" | "scarecrow" | "oni" | "guard" | "kitsune";
+export type FighterKind = "ronin" | "scarecrow" | "oni" | "guard" | "kitsune" | "shinobi";
 
 export interface Look {
   kind: FighterKind;
@@ -157,6 +157,27 @@ export const ENEMY_LOOKS: Record<Exclude<FighterKind, "ronin">, Look> = {
     gear: "#ff6b00", // оранжевое пламя
     gearSh: "#c77dff", // фиолетовые кончики хвостов
   },
+  shinobi: {
+    kind: "shinobi",
+    outline: "#101018",
+    skin: "#e8d5c0", // видна только полоска глаз
+    skinSh: "#c9a98a",
+    main: "#2b2d42", // тёмный костюм
+    mainSh: "#1d1f30",
+    mainHi: "#3f4260",
+    accent: "#c1121f", // алая повязка и кушак
+    leg: "#23253a",
+    legSh: "#181a2b",
+    boot: "#101018",
+    blade: "#c9d4e8", // бледная сталь кодати
+    bladeSh: "#97a3c4",
+    bladeHi: "#eef4ff",
+    guard: "#3a2a1a",
+    eye: "#7ee081", // светящиеся зелёные глаза
+    hair: "#c1121f",
+    gear: "#3f4260", // капюшон
+    gearSh: "#2b2d42",
+  },
 };
 
 interface DrawOpts {
@@ -205,10 +226,12 @@ export function drawFighter(
   const t = o.poseT;
   const walkSw = pose === "walk" ? Math.sin(o.time * 10) : 0;
   const lean =
-    pose === "dodge" || pose === "hurt" ? -1 : pose === "strike" && t > 0.3 && t < 0.65 ? 1 : 0;
+    pose === "dodge" || pose === "hurt" ? -1
+    : pose === "roll" ? 2 // низкий рывок вперёд
+    : pose === "strike" && t > 0.3 && t < 0.65 ? 1 : 0;
 
   // ---------------- legs ----------------
-  const tuck = pose === "leap" ? 2 : pose === "dodge" ? 1 : 0;
+  const tuck = pose === "leap" ? 2 : pose === "roll" ? 2 : pose === "dodge" ? 1 : 0;
   const liftL = pose === "walk" && walkSw > 0 ? 1 : 0;
   const liftR = pose === "walk" && walkSw <= 0 ? 1 : 0;
   const legH = 5 - tuck;
@@ -261,7 +284,12 @@ function drawTorso(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn, le
   const x = 5 + lean;
 
   // neck bridging head and torso
-  const neck = k === "guard" ? look.gearSh : k === "kitsune" ? look.mainSh : k === "scarecrow" ? look.skin : look.skin;
+  const neck =
+    k === "guard" ? look.gearSh
+    : k === "kitsune" ? look.mainSh
+    : k === "shinobi" ? look.main
+    : k === "scarecrow" ? look.skin
+    : look.skin;
   px(7 + lean, 9, 4, 2, neck);
 
   if (k === "scarecrow") {
@@ -335,6 +363,24 @@ function drawTorso(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn, le
     // волнистый подол
     px(x + 1, 18, 2, 1, look.mainSh);
     px(x + 6, 18, 2, 1, look.mainSh);
+  } else if (k === "shinobi") {
+    // обтягивающий тёмный костюм
+    px(x, 11, 9, 8, look.main);
+    px(x, 11, 2, 8, look.mainSh);
+    px(x + 7, 11, 1, 8, look.mainSh);
+    // бронепластины на груди
+    px(x + 3, 11, 4, 2, look.mainHi);
+    px(x + 4, 13, 2, 1, look.mainHi);
+    // алая перевязь наискось
+    px(x + 1, 11, 2, 1, look.accent);
+    px(x + 3, 12, 2, 1, look.accent);
+    px(x + 5, 13, 2, 1, look.accent);
+    // кушак с knot
+    px(x, 15, 9, 1, look.accent);
+    px(x + 2, 16, 1, 2, look.accent); // свисающий конец
+    // второе кодати за спиной (рукоять торчит над плечом)
+    px(x - 2, 9, 1, 2, look.guard);
+    px(x - 2, 11, 1, 6, look.bladeSh);
   } else {
     // бирюзовое кимоно ронина с V-вырезом
     px(x, 11, 9, 7, look.main);
@@ -469,6 +515,30 @@ function drawHead(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn, lea
     // рыжие волосы по бокам маски
     px(hx - 1, 3, 1, 5, look.hair);
     px(hx + 8, 3, 1, 4, look.hair);
+  } else if (k === "shinobi") {
+    // капюшон
+    px(hx, 0, 8, 2, look.gear);
+    px(hx - 1, 2, 10, 2, look.gear);
+    px(hx - 1, 2, 10, 1, look.gearSh);
+    // боковые лопасти капюшона
+    px(hx - 1, 4, 2, 4, look.gearSh);
+    px(hx + 7, 4, 2, 4, look.gearSh);
+    // открытая полоска глаз
+    px(hx + 1, 4, 6, 2, look.skin);
+    if (pose === "ko") {
+      px(hx + 2, 5, 2, 1, look.eye);
+      px(hx + 5, 5, 2, 1, look.eye);
+    } else {
+      // светящиеся зелёные глаза
+      px(hx + 2, 4, 1, 2, look.eye);
+      px(hx + 5, 4, 1, 2, look.eye);
+    }
+    // повязка на нижней части лица
+    px(hx + 1, 6, 6, 2, look.mainSh);
+    px(hx + 1, 6, 6, 1, look.accent); // алая кромка
+    // концы повязки развеваются назад
+    px(hx - 2, 5, 2, 1, look.accent);
+    px(hx - 3, 6, 2, 1, look.accent);
   } else {
     // лицо ронина под шляпой (минимум деталей)
     px(hx, 4, 8, 5, look.skin);
@@ -575,6 +645,9 @@ function drawArmWeapon(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn
     if (k === "oni") spikes(handX, handY - 2, 1, -1, 9);
   } else if (pose === "dodge") {
     bladeLine(handX, handY - 1, 1, -1, 7, k === "oni" ? 2 : 1);
+  } else if (pose === "roll") {
+    // клинок стелется за спиной, пока тело скользит понизу
+    bladeLine(handX - 1, handY + 2, -1, 0, k === "oni" ? 9 : 8, 1);
   } else if (k === "guard") {
     // нагината вертикально: длинное древко + изогнутое лезвие наверху
     px(handX + 1, handY - 9, 1, 12, look.guard); // древко

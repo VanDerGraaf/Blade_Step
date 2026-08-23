@@ -297,6 +297,86 @@ export const IconPause = ({ className }: { className?: string }) => <Px rows={PA
 export const IconHome = ({ className }: { className?: string }) => <Px rows={HOME_ROWS} className={className} />;
 export const IconRetry = ({ className }: { className?: string }) => <Px rows={RETRY_ROWS} className={className} />;
 
+const ROLL_ROWS = [
+  "................",
+  ".....######.....",
+  "...###....###...",
+  "..##........##..",
+  ".##...####...##.",
+  ".#...##..##...#.",
+  "#....#....#....#",
+  "#....#....#....#",
+  "#....#....#.....",
+  "#....#....#.....",
+  ".#...##..##..##.",
+  ".##...####..#.#.",
+  "..##.........##.",
+  "...###.....###..",
+  ".....######.#...",
+  "............#...",
+];
+export const IconRoll = ({ className }: { className?: string }) => <Px rows={ROLL_ROWS} className={className} />;
+
+const CLEAVE_ROWS = [
+  "..........##....",
+  ".........###....",
+  "........###.....",
+  ".......###......",
+  "......###....##.",
+  ".....###....###.",
+  "....###....###..",
+  "...###....###...",
+  "..###....###....",
+  ".###....###.....",
+  "###....###......",
+  "##....###.......",
+  ".....###........",
+  "....###.........",
+  "...##...........",
+  "................",
+];
+export const IconCleave = ({ className }: { className?: string }) => <Px rows={CLEAVE_ROWS} className={className} />;
+
+const BASH_ROWS = [
+  "................",
+  "..#########..#..",
+  ".###########.##.",
+  ".###########..#.",
+  ".###########.#..",
+  ".###########.#..",
+  ".###########.#..",
+  ".##########..#..",
+  "..#########.#...",
+  "...#######..#...",
+  "....#####.......",
+  ".....###........",
+  "......#.........",
+  "................",
+  "................",
+  "................",
+];
+export const IconBash = ({ className }: { className?: string }) => <Px rows={BASH_ROWS} className={className} />;
+
+const REFLECT_ROWS = [
+  "................",
+  ".......##.......",
+  "......####......",
+  ".....##..##.....",
+  "....##.#..##....",
+  "...##..#...##...",
+  "..##...#....##..",
+  ".##....#.....##.",
+  ".##....#.....##.",
+  "..##...#....##..",
+  "...##..#...##...",
+  "....##.#..##....",
+  ".....##..##.....",
+  "......####......",
+  ".......##.......",
+  "................",
+];
+export const IconReflect = ({ className }: { className?: string }) => <Px rows={REFLECT_ROWS} className={className} />;
+
 export function ActionIcon({ action, className }: { action: Action; className?: string }) {
   switch (action) {
     case "fwd":
