@@ -543,31 +543,38 @@ function drawArmWeapon(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn
       if (k === "oni") spikes(handX + 1, handY, 1, 0, 11);
       bladeLine(handX + 1, handY + 1, 1, 0, 8, 1);
     } else {
-      bladeLine(handX, handY + 1, 1, 1, 8, k === "oni" ? 2 : 1);
+      // возврат в стойку — клинок вверх-вперёд
+      bladeLine(handX + 1, handY - 1, 1, -1, 8, k === "oni" ? 2 : 1);
+      if (k === "oni") spikes(handX + 1, handY - 1, 1, -1, 8);
     }
   } else if (pose === "leap") {
     bladeLine(handX, handY - 2, 1, -1, 9, k === "oni" ? 2 : 1);
     if (k === "oni") spikes(handX, handY - 2, 1, -1, 9);
   } else if (pose === "dodge") {
-    bladeLine(handX, handY + 1, 1, 1, 7, k === "oni" ? 2 : 1);
+    bladeLine(handX, handY - 1, 1, -1, 7, k === "oni" ? 2 : 1);
   } else if (k === "guard") {
     // нагината вертикально: длинное древко + изогнутое лезвие наверху
     px(handX + 1, handY - 9, 1, 12, look.guard); // древко
     px(handX + 1, handY - 12, 1, 3, look.blade); // лезвие
     px(handX + 2, handY - 13, 1, 2, look.bladeHi); // изгиб
     px(handX + 3, handY - 13, 1, 1, look.blade);
+  } else if (k === "scarecrow") {
+    // посох вертикально, упирается в землю
+    px(handX + 1, handY - 7, 1, 11, look.guard);
+    px(handX + 1, handY - 7, 1, 1, look.bladeSh); // сучок наверху
   } else {
-    bladeLine(handX, handY, 1, 1, 9, k === "oni" ? 2 : 1);
-    if (k === "oni") spikes(handX, handY, 1, 1, 9);
+    // боевая стойка — клинок поднят вверх-вперёд
+    bladeLine(handX, handY - 1, 1, -1, 9, k === "oni" ? 2 : 1);
+    if (k === "oni") spikes(handX, handY - 1, 1, -1, 9);
   }
 
-  // кицунэ: оранжевое пламя вокруг призрачного клинка (мерцает)
+  // кицунэ: оранжевое пламя вокруг кончика призрачного клинка (мерцает)
   if (k === "kitsune") {
     const f = Math.floor(o.time * 8) % 2;
-    px(handX + 8, handY + 8, 1, 1, look.gear);
-    px(handX + 9, handY + 9 - f, 1, 1, look.gear);
-    px(handX + 7, handY + 9, 1, 1, look.gear);
-    px(handX + 8, handY + 7 + f, 1, 1, look.bladeHi);
+    px(handX + 8, handY - 10, 1, 1, look.gear);
+    px(handX + 9, handY - 9 - f, 1, 1, look.gear);
+    px(handX + 7, handY - 9, 1, 1, look.gear);
+    px(handX + 8, handY - 8 + f, 1, 1, look.bladeHi);
   }
 }
 
