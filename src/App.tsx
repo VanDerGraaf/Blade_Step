@@ -427,12 +427,14 @@ function OverScreen({
   enemyName,
   onRematch,
   onMenu,
+  rematchLabel = "РЕВАНШ",
 }: {
   result: GameResult;
   stats: MatchStats;
   enemyName: string;
   onRematch: () => void;
   onMenu: () => void;
+  rematchLabel?: string;
 }) {
   const map = {
     win: { text: "ПОБЕДА", color: "#ffc24b", line: `${enemyName} повержен. Помост твой.` },
@@ -462,8 +464,8 @@ function OverScreen({
             <StatCell v={stats.dealt - stats.taken} label="разница" color="#3ddad7" />
           </div>
           <div className="flex gap-2">
-            <button onClick={onRematch} className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[12px] flex items-center justify-center gap-2">
-              <IconRetry className="w-4 h-4" /> РЕВАНШ
+            <button onClick={onRematch} className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2">
+              <IconRetry className="w-4 h-4" /> {rematchLabel}
             </button>
             <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px] flex items-center justify-center gap-2">
               <IconHome className="w-4 h-4" /> В МЕНЮ
@@ -597,6 +599,13 @@ export default function App() {
     };
     net.setHooks(hooks);
   }, [engine, beginNetMatch, resetNetUi]);
+
+  // скрыть уведомление о разрыве через 3.5 с
+  useEffect(() => {
+    if (!netDrop) return;
+    const t = window.setTimeout(() => setNetDrop(false), 3500);
+    return () => window.clearTimeout(t);
+  }, [netDrop]);
 
   // таймер 20 секунд на планирование (сетевая игра)
   useEffect(() => {
@@ -1080,15 +1089,49 @@ export default function App() {
       </footer>
 
       {/* ---------- overlays ---------- */}
-      {ui.screen === "menu" && <MenuScreen pers={pers} setPers={setPers} onStart={startMatch} />}
+      {ui.screen === "menu" && (
+        <MenuScreen
+          pers={pers}
+          setPers={setPers}
+          onStart={startMatch}
+          netPanel={{
+            state: netState,
+            code: roomCode,
+            join: joinCode,
+            setJoin: setJoinCode,
+            error: netError,
+            onCreate: createRoom,
+            onJoin: joinRoom,
+            onCancel: cancelNet,
+          }}
+        />
+      )}
       {ui.screen === "over" && ui.result && (
         <OverScreen
           result={ui.result}
           stats={ui.stats}
-          enemyName={enemyMeta.name}
-          onRematch={startMatch}
+          enemyName={ui.mode === "net" ? "Соперник" : enemyMeta.name}
+          onRematch={ui.mode === "net" ? requestRematch : startMatch}
           onMenu={quitToMenu}
+          rematchLabel={
+            ui.mode === "net"
+              ? rematchSent
+                ? oppWantsRematch
+                  ? "РЕВАНШ!"
+                  : "ЖДЁМ СОПЕРНИКА…"
+                : oppWantsRematch
+                  ? "СОПЕРНИК ЖДЁТ — РЕВАНШ!"
+                  : "ПРЕДЛОЖИТЬ РЕВАНШ"
+              : "РЕВАНШ"
+          }
         />
+      )}
+
+      {/* уведомление о разрыве соединения */}
+      {netDrop && ui.screen === "menu" && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 px-panel bg-[#3a1020] px-4 py-2 anim-rise">
+          <p className="font-pixel text-[9px] text-blood">СОПЕРНИК ПОКИНУЛ ПОМОСТ</p>
+        </div>
       )}
     </div>
   );
