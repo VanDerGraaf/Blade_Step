@@ -3,13 +3,14 @@
  * Blade Step — упаковка в десктопное приложение через Pake (системный WebView).
  *
  * Использование:
- *   node package-pake.cjs
+ *   node package-pake.cjs          — полная упаковка
+ *   node package-pake.cjs --find   — только найти уже собранный файл (быстро)
  *
  * Скрипт сам:
  *   1) ставит npm-зависимости, если их нет,
  *   2) собирает игру локальным vite (vite build --base=./),
  *   3) рисует иконку (tools/make-icon.cjs) и конвертирует в .ico для Windows,
- *   4) запускает pake — на выходе один файл-установщик в корне проекта.
+ *   4) запускает pake — установщик появится в output/ (скрипт найдёт и покажет путь).
  *
  * Требования (один раз на машине упаковщика):
  *   - Rust:        https://rustup.rs
@@ -33,6 +34,63 @@ const fail = (s) => {
   console.error("\x1b[31m[pack]\x1b[0m " + s);
   process.exit(1);
 };
+
+/** Рекурсивный поиск собранных артефактов по всему проекту. */
+const isArtifact = (f) => /-setup\.exe$|_x64\.exe$|\.msi$|\.dmg$|\.AppImage$|\.deb$|\.tar\.gz$/.test(f);
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "src", "public", "tools"]);
+function findArtifacts() {
+  const found = [];
+  (function walk(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(p);
+      } else if (isArtifact(e.name) || (e.name.endsWith(".exe") && dir.startsWith(path.join(root, "output")))) {
+        found.push(path.relative(root, p));
+      }
+    }
+  })(root);
+  return found;
+}
+
+/** Вывод содержимого папки (на один уровень вглубь) для диагностики. */
+function dumpDir(rel) {
+  const abs = path.join(root, rel);
+  if (!fs.existsSync(abs)) {
+    warn(`  ${rel}/ — отсутствует`);
+    return;
+  }
+  warn(`  ${rel}/:`);
+  try {
+    for (const f of fs.readdirSync(abs)) {
+      const p = path.join(abs, f);
+      warn(`    - ${f}${fs.statSync(p).isDirectory() ? "/" : ""}`);
+      if (fs.statSync(p).isDirectory()) {
+        for (const g of fs.readdirSync(p).slice(0, 12)) warn(`        - ${g}`);
+      }
+    }
+  } catch {
+    /* noop */ }
+}
+
+// Быстрый режим: только найти уже собранное, ничего не пересобирая
+if (process.argv.includes("--find")) {
+  const found = findArtifacts();
+  if (found.length) {
+    log("Найдено:");
+    for (const a of found) log("  → " + a);
+  } else {
+    warn("Ничего не найдено. Содержимое подозрительных папок:");
+    for (const d of ["output", path.join("target", "release", "bundle"), path.join("target", "release")]) dumpDir(d);
+  }
+  process.exit(0);
+}
 
 // ---------- 1. зависимости и сборка ----------
 if (!fs.existsSync(path.join(root, "node_modules", "vite"))) {
@@ -97,26 +155,21 @@ try {
 cfg.icon = origIcon;
 fs.writeFileSync(pakeJson, JSON.stringify(cfg, null, 2) + "\n");
 if (!ok) {
-  fail(
-    "pake завершился с ошибкой. Частые причины:\n" +
-      "  - нет Rust (rustup.rs) или cargo не в PATH;\n" +
-      "  - Windows: нет MSVC C++ Build Tools (ошибка про link.exe);\n" +
-      "  - сеть: cargo не смог скачать крейты с crates.io."
-  );
+  warn("pake завершился с ненулевым кодом — всё равно поищу, что собралось…");
 }
 
 // ---------- 5. результат ----------
-// pake кладёт артефакты в output/, но проверим и корень — на всякий случай
-const outDir = path.join(root, "output");
-const isArtifact = (f) => /-setup\.exe$|\.msi$|\.dmg$|\.AppImage$|\.deb$|\.tar\.gz$/.test(f);
-const artifacts = [
-  ...(fs.existsSync(outDir) ? fs.readdirSync(outDir).filter(isArtifact).map((f) => path.join("output", f)) : []),
-  ...fs.readdirSync(root).filter(isArtifact),
-];
-if (!artifacts.length)
+// Разные версии pake кладут артефакты в разные места (output/, output/<name>/,
+// target/release/bundle/…). Ищем рекурсивно по всему проекту.
+const artifacts = findArtifacts();
+
+if (!artifacts.length) {
+  warn("Установщик не найден. Содержимое подозрительных папок:");
+  for (const d of ["output", path.join("target", "release", "bundle"), path.join("target", "release")]) dumpDir(d);
   fail(
-    "pake отработал, но файл-установщик не найден ни в output/, ни в корне.\n" +
-      "  Посмотрите вручную: папка «output» рядом с pake.json."
+    "Пришлите вывод выше — по нему станет видно, куда pake положил приложение\n" +
+      "(возможно, это просто папка с .exe внутри, а не установщик)."
   );
+}
 log("Готово! Раздавайте файл(ы):");
 for (const a of artifacts) log("  → " + a);

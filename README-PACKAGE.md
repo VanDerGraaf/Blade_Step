@@ -27,7 +27,8 @@ output/BladeStep_2.x.x_x64_en-US.msi      ← (может быть и msi-вер
 ## Упаковка
 
 ```
-node package-pake.cjs
+node package-pake.cjs          # полная упаковка
+node package-pake.cjs --find   # быстро найти уже собранный файл, ничего не пересобирая
 ```
 
 Скрипт всё делает сам:
