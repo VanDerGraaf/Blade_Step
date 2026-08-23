@@ -273,6 +273,26 @@ const MUSIC_ROWS = [
   "................",
 ];
 export const IconMusic = ({ className }: { className?: string }) => <Px rows={MUSIC_ROWS} className={className} />;
+
+const WAIT_ROWS = [
+  "................",
+  "................",
+  "..############..",
+  "..############..",
+  "...##......##...",
+  "....##....##....",
+  ".....##..##.....",
+  "......####......",
+  "......####......",
+  ".....##..##.....",
+  "....##....##....",
+  "...##......##...",
+  "..############..",
+  "..############..",
+  "................",
+  "................",
+];
+export const IconWait = ({ className }: { className?: string }) => <Px rows={WAIT_ROWS} className={className} />;
 export const IconPause = ({ className }: { className?: string }) => <Px rows={PAUSE_ROWS} className={className} />;
 export const IconHome = ({ className }: { className?: string }) => <Px rows={HOME_ROWS} className={className} />;
 export const IconRetry = ({ className }: { className?: string }) => <Px rows={RETRY_ROWS} className={className} />;
@@ -291,5 +311,7 @@ export function ActionIcon({ action, className }: { action: Action; className?: 
       return <IconStrike className={className} />;
     case "block":
       return <IconBlock className={className} />;
+    case "wait":
+      return <IconWait className={className} />;
   }
 }

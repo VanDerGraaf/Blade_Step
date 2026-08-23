@@ -273,6 +273,7 @@ function counterOf(a: Action, dist: number): Weights {
     case "dodge": return { fwd: 44, block: 30, strike: 26 };
     case "strike": return dist <= 1 ? { dodge: 44, block: 36, strike: 20 } : { fwd: 46, jump: 30, strike: 24 };
     case "block": return { jump: 52, fwd: 32, strike: 16 };
+    case "wait": return { strike: 60, fwd: 30, jump: 10 }; // free hit on a frozen foe
   }
 }
 

@@ -10,6 +10,7 @@ import {
   Personality,
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
+import { net, NetMsg } from "./game/net";
 import {
   ActionIcon,
   IconHeart,
@@ -193,14 +194,27 @@ function ThreatSkulls({ n, color }: { n: number; color: string }) {
   );
 }
 
+interface NetPanelProps {
+  state: "off" | "hosting" | "joining" | "connected";
+  code: string;
+  join: string;
+  setJoin: (v: string) => void;
+  error: string;
+  onCreate: () => void;
+  onJoin: () => void;
+  onCancel: () => void;
+}
+
 function MenuScreen({
   pers,
   setPers,
   onStart,
+  netPanel,
 }: {
   pers: MenuChoice;
   setPers: (p: MenuChoice) => void;
   onStart: () => void;
+  netPanel: NetPanelProps;
 }) {
   const [rulesOpen, setRulesOpen] = useState(false);
   return (
@@ -281,10 +295,87 @@ function MenuScreen({
             </div>
             <button
               onClick={onStart}
+              disabled={netPanel.state !== "off"}
               className="px-btn no-select w-full mt-2.5 py-2.5 md:py-3 bg-blood text-paper text-[12px] md:text-[13px] tracking-widest"
             >
               К БОЮ
             </button>
+
+            {/* ---- сетевая дуэль ---- */}
+            <div className="mt-3 pt-2.5 border-t-2 border-dashed border-[#39406e]">
+              <p className="font-pixel text-[9px] text-[#3ddad7] mb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-[#3ddad7] inline-block anim-blink" />
+                СЕТЕВАЯ ДУЭЛЬ (P2P)
+              </p>
+
+              {netPanel.state === "off" && (
+                <div className="flex flex-col gap-1.5">
+                  <button
+                    onClick={netPanel.onCreate}
+                    className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
+                  >
+                    СОЗДАТЬ КОМНАТУ
+                  </button>
+                  <div className="flex gap-1.5">
+                    <input
+                      value={netPanel.join}
+                      onChange={(e) => netPanel.setJoin(e.target.value.toUpperCase().slice(0, 4))}
+                      placeholder="КОД"
+                      className="font-pixel flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-[0.3em] text-center placeholder:text-[#39406e] placeholder:tracking-normal outline-none focus:border-[#3ddad7]"
+                    />
+                    <button
+                      onClick={netPanel.onJoin}
+                      className="px-btn no-select px-4 py-2 bg-panel text-paper text-[10px]"
+                    >
+                      ВОЙТИ
+                    </button>
+                  </div>
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight">{netPanel.error}</p>
+                  )}
+                  <p className="font-body text-[9px] text-dim/70 leading-tight">
+                    Друг создаёт комнату и диктует код — вы входите по нему. Нужен интернет.
+                  </p>
+                </div>
+              )}
+
+              {netPanel.state === "hosting" && (
+                <div className="text-center">
+                  <p className="font-body text-[10px] text-dim mb-1">Код комнаты:</p>
+                  <p className="font-pixel text-[26px] text-[#3ddad7] tracking-[0.25em] mb-1.5 drop-shadow-[3px_3px_0_#070919]">
+                    {netPanel.code}
+                  </p>
+                  <p className="font-body text-[10px] text-dim mb-2">
+                    Ждём второго бойца… <span className="anim-blink">▮</span>
+                  </p>
+                  <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
+                    ОТМЕНА
+                  </button>
+                </div>
+              )}
+
+              {netPanel.state === "joining" && (
+                <div className="text-center">
+                  <p className="font-body text-[10px] text-dim mb-2">
+                    Подключаемся к комнате <span className="text-[#3ddad7] font-pixel">{netPanel.join}</span>…{" "}
+                    <span className="anim-blink">▮</span>
+                  </p>
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight mb-2">{netPanel.error}</p>
+                  )}
+                  <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
+                    ОТМЕНА
+                  </button>
+                </div>
+              )}
+
+              {netPanel.state === "connected" && (
+                <div className="text-center">
+                  <p className="font-pixel text-[11px] text-gold mb-1">СОПЕРНИК НАЙДЕН!</p>
+                  <p className="font-body text-[10px] text-dim">Бой начинается…</p>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* rules: collapsed by default */}
@@ -400,11 +491,132 @@ export default function App() {
   const [music, setMusicState] = useState(isMusicOn());
   const [paused, setPaused] = useState(false);
 
+  // ---- сетевая дуэль ----
+  const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
+  const [roomCode, setRoomCode] = useState("");
+  const [joinCode, setJoinCode] = useState("");
+  const [netPeerName, setNetPeerName] = useState("Соперник");
+  const [netError, setNetError] = useState("");
+  const [netDrop, setNetDrop] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(20);
+  const [oppWantsRematch, setOppWantsRematch] = useState(false);
+  const [rematchSent, setRematchSent] = useState(false);
+  const myRematchRef = useRef(false);
+  const oppRematchRef = useRef(false);
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+
+  const resetNetUi = useCallback(() => {
+    setNetState("off");
+    setRoomCode("");
+    setJoinCode("");
+    setNetError("");
+    setNetPeerName("Соперник");
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+  }, []);
+
+  const beginNetMatch = useCallback(() => {
+    initAudio();
+    setPaused(false);
+    engine.paused = false;
+    setSlots([null, null, null]);
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+    engine.startNetMatch(uiRef.current.netPeer ?? "Соперник");
+  }, [engine]);
+
   useEffect(() => {
     engine.setListener((patch) => setUi((u) => ({ ...u, ...patch })));
     if (canvasRef.current) engine.attach(canvasRef.current);
-    return () => engine.detach();
+    engine.netSend = (m) => net.send(m);
+    return () => {
+      engine.detach();
+      net.teardown();
+    };
   }, [engine]);
+
+  // сетевые события: подключение, сообщения, разрыв
+  useEffect(() => {
+    const hooks = {
+      onCode: (code: string) => {
+        setRoomCode(code);
+        setNetState("hosting");
+        setNetError("");
+      },
+      onConnected: (_name: string, isHost: boolean) => {
+        setNetState("connected");
+        setNetError("");
+        sfx.win();
+        if (isHost) {
+          net.send({ t: "begin" });
+          window.setTimeout(beginNetMatch, 2200);
+        }
+      },
+      onMsg: (m: NetMsg) => {
+        if (m.t === "hello") {
+          setNetPeerName(m.name || "Соперник");
+        } else if (m.t === "begin") {
+          window.setTimeout(beginNetMatch, 1900);
+        } else if (m.t === "hand") {
+          engine.receiveNetHand(m.hand as Action[]);
+        } else if (m.t === "plan") {
+          engine.receiveNetPlan(m.plan as Action[]);
+        } else if (m.t === "rematch") {
+          oppRematchRef.current = true;
+          setOppWantsRematch(true);
+          sfx.select();
+          if (myRematchRef.current) beginNetMatch();
+        } else if (m.t === "quit") {
+          if (uiRef.current.screen !== "menu") {
+            engine.toMenu();
+            setNetDrop(true);
+          }
+          net.teardown();
+          resetNetUi();
+        }
+      },
+      onDrop: () => {
+        if (uiRef.current.screen !== "menu") {
+          engine.toMenu();
+          setNetDrop(true);
+        }
+        resetNetUi();
+      },
+      onError: (msg: string) => {
+        setNetError(msg);
+        setNetState("off");
+        setRoomCode("");
+      },
+    };
+    net.setHooks(hooks);
+  }, [engine, beginNetMatch, resetNetUi]);
+
+  // таймер 20 секунд на планирование (сетевая игра)
+  useEffect(() => {
+    if (!(ui.screen === "play" && ui.mode === "net" && ui.phase === "plan")) return;
+    setTimeLeft(20);
+    const iv = window.setInterval(() => setTimeLeft((t) => Math.max(0, t - 0.1)), 100);
+    return () => window.clearInterval(iv);
+  }, [ui.screen, ui.mode, ui.phase, ui.round]);
+
+  useEffect(() => {
+    if (!(ui.screen === "play" && ui.mode === "net" && ui.phase === "plan")) return;
+    if (timeLeft > 0) return;
+    // время вышло: незаполненные слоты становятся «стойкой»
+    const plan = slotsRef.current.map((i) =>
+      i === null ? "wait" : uiRef.current.playerHand[i] ?? "wait"
+    ) as Action[];
+    sfx.ko();
+    engine.commitNetPlan(plan);
+    setSlots([null, null, null]);
+  }, [timeLeft, ui.screen, ui.mode, ui.phase, engine]);
 
   const selectHandDie = useCallback(
     (handIdx: number) => {
@@ -446,11 +658,13 @@ export default function App() {
     initAudio();
     sfx.fight();
     const plan = slots.map((i) => (i === null ? "fwd" : ui.playerHand[i] ?? "fwd")) as Action[];
-    engine.fight(plan);
+    if (ui.mode === "net") engine.commitNetPlan(plan);
+    else engine.fight(plan);
     setSlots([null, null, null]);
-  }, [ui.phase, ready, slots, ui.playerHand, engine]);
+  }, [ui.phase, ui.mode, ready, slots, ui.playerHand, engine]);
 
   const startMatch = useCallback(() => {
+    if (netState === "connected" || netState === "hosting" || netState === "joining") return;
     initAudio();
     setPaused(false);
     engine.paused = false;
@@ -458,7 +672,37 @@ export default function App() {
     const all: Personality[] = ["random", "aggressor", "controller", "mirror"];
     const choice = pers === "any" ? all[Math.floor(Math.random() * all.length)] : pers;
     engine.startMatch(choice);
-  }, [engine, pers]);
+  }, [engine, pers, netState]);
+
+  // ---- сетевые действия из меню ----
+  const createRoom = useCallback(() => {
+    initAudio();
+    sfx.select();
+    setNetError("");
+    setJoinCode("");
+    net.host();
+    setNetState("hosting");
+  }, []);
+
+  const joinRoom = useCallback(() => {
+    const code = joinCode.trim().toUpperCase();
+    if (code.length < 4) {
+      setNetError("Введите код комнаты (4 символа).");
+      return;
+    }
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.join(code);
+    setNetState("joining");
+  }, [joinCode]);
+
+  const cancelNet = useCallback(() => {
+    net.send({ t: "quit" });
+    net.teardown();
+    resetNetUi();
+    sfx.back();
+  }, [resetNetUi]);
 
   const togglePause = useCallback(() => {
     if (ui.screen !== "play") return;
@@ -473,8 +717,29 @@ export default function App() {
   const quitToMenu = useCallback(() => {
     engine.paused = false;
     setPaused(false);
+    if (net.connected) {
+      net.send({ t: "quit" });
+      net.teardown();
+      resetNetUi();
+    }
+    setNetDrop(false);
     engine.toMenu();
-  }, [engine]);
+  }, [engine, resetNetUi]);
+
+  /** Реванш: в сетевой игре нужно согласие обоих. */
+  const requestRematch = useCallback(() => {
+    if (uiRef.current.mode !== "net") {
+      startMatch();
+      return;
+    }
+    if (myRematchRef.current) return; // уже ждём
+    initAudio();
+    sfx.select();
+    myRematchRef.current = true;
+    setRematchSent(true);
+    net.send({ t: "rematch" });
+    if (oppRematchRef.current) beginNetMatch();
+  }, [startMatch, beginNetMatch]);
 
   const toggleMute = useCallback(() => {
     initAudio();
@@ -505,7 +770,7 @@ export default function App() {
         }
       } else if (ev.key === "Enter") {
         if (ui.screen === "menu") startMatch();
-        else if (ui.screen === "over") startMatch();
+        else if (ui.screen === "over") requestRematch();
         else if (ui.phase === "plan") fight();
       } else if (ev.key === "Escape") {
         if (ui.screen === "play") togglePause();
@@ -517,7 +782,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectHandDie, clearSlots, fight, startMatch, togglePause, toggleMute, toggleMusic, ui.phase, ui.screen]);
+  }, [selectHandDie, clearSlots, fight, startMatch, requestRematch, togglePause, toggleMute, toggleMusic, ui.phase, ui.screen]);
 
   const enemyMeta = PERSONALITIES[ui.personality];
   const inGame = ui.screen !== "menu";
@@ -547,8 +812,11 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2 min-w-0">
           <Pips hp={ui.eHp} right />
-          <span className="font-pixel text-[9px] md:text-[11px] whitespace-nowrap" style={{ color: enemyMeta.color }}>
-            {enemyMeta.name}
+          <span
+            className="font-pixel text-[9px] md:text-[11px] whitespace-nowrap"
+            style={{ color: ui.mode === "net" ? "#e63946" : enemyMeta.color }}
+          >
+            {ui.mode === "net" ? (ui.netPeer ?? "СОПЕРНИК") : enemyMeta.name}
           </span>
           <span className="hidden sm:flex items-center gap-1 ml-1">
             <button onClick={toggleMute} className="px-btn w-8 h-8 bg-panel text-paper flex items-center justify-center" aria-label="звук">
@@ -621,6 +889,33 @@ export default function App() {
                 [1–6] взять кубик · [⌫] сброс · [Enter] бой
               </p>
             </div>
+
+            {ui.mode === "net" && ui.phase === "plan" && (
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="font-pixel text-[8px] text-dim whitespace-nowrap">ВРЕМЯ</span>
+                <div className="flex-1 h-3 border-2 border-[#070919] bg-ink2 relative overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 transition-[width] duration-100 ease-linear"
+                    style={{
+                      width: `${(timeLeft / 20) * 100}%`,
+                      background:
+                        timeLeft > 10 ? "#2a9d8f" : timeLeft > 5 ? "#e9c46a" : "#e63946",
+                    }}
+                  />
+                  <div className="absolute inset-0 opacity-30 pointer-events-none" style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(90deg, transparent 0 9px, #070919 9px 10px)",
+                  }} />
+                </div>
+                <span
+                  className={`font-pixel text-[11px] w-8 text-right ${
+                    timeLeft <= 5 ? "text-blood anim-blink" : "text-paper"
+                  }`}
+                >
+                  {Math.ceil(timeLeft)}
+                </span>
+              </div>
+            )}
 
             <div className="flex flex-col gap-1.5 md:gap-2">
               {/* ---- PLAYER: hand -> plan ---- */}

@@ -49,6 +49,29 @@ export const PLAYER_LOOK: Look = {
   gearSh: "#a8895a",
 };
 
+/** Второй ронин для сетевой дуэли — красный клан. */
+export const RIVAL_RONIN_LOOK: Look = {
+  kind: "ronin",
+  outline: "#1a1a1a",
+  skin: "#f2d3b0",
+  skinSh: "#d8a87e",
+  main: "#c1121f", // красное кимоно
+  mainSh: "#8f0e1a",
+  mainHi: "#e63946",
+  accent: "#e9c46a", // золотой пояс
+  leg: "#3a1f2a",
+  legSh: "#29141e",
+  boot: "#4a2a1a",
+  blade: "#a8a8a8",
+  bladeSh: "#808080",
+  bladeHi: "#d0d0d0",
+  guard: "#4a3a2a",
+  eye: "#1a1a1a",
+  hair: "#00b4d8", // голубой шарф
+  gear: "#8b6f47", // тёмная шляпа
+  gearSh: "#6b4f2e",
+};
+
 export const ENEMY_LOOKS: Record<Exclude<FighterKind, "ronin">, Look> = {
   scarecrow: {
     kind: "scarecrow",

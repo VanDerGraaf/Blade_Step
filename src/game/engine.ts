@@ -11,8 +11,9 @@ import {
   PLAYER_START,
 } from "./types";
 import { aiPlan, resolveStep, rollHand, StepResult } from "./logic";
-import { drawFighter, drawShadow, ENEMY_LOOKS, Look, PLAYER_LOOK, Pose } from "./sprites";
+import { drawFighter, drawShadow, ENEMY_LOOKS, Look, PLAYER_LOOK, Pose, RIVAL_RONIN_LOOK } from "./sprites";
 import { sfx } from "./audio";
+import type { NetMsg } from "./net";
 
 export const VIEW_W = 960;
 export const VIEW_H = 540;
@@ -27,6 +28,8 @@ export interface UiSnapshot {
   screen: "menu" | "play" | "over";
   phase: "idle" | "plan" | "thinking" | "resolve" | "ko";
   personality: Personality;
+  mode: "ai" | "net";
+  netPeer: string | null;
   round: number;
   pHp: number;
   eHp: number;
@@ -48,6 +51,8 @@ export const initialUi: UiSnapshot = {
   screen: "menu",
   phase: "idle",
   personality: "aggressor",
+  mode: "ai",
+  netPeer: null,
   round: 1,
   pHp: MAX_HP,
   eHp: MAX_HP,
@@ -163,6 +168,14 @@ export class Engine {
   private playerHand: Action[] = [];
   private enemyHand: Action[] = [];
   private round = 1;
+
+  // ---- сетевой режим ----
+  private mode: "ai" | "net" = "ai";
+  private netEnemyPlan: Action[] | null = null;
+  private netEnemyHand: Action[] = [];
+  private planCommitted = false;
+  /** Колбэк отправки сообщений сопернику (подключает App). */
+  netSend: (m: NetMsg) => void = () => {};
   private histTotal: Partial<Record<Action, number>> = {};
   private histFirst: Partial<Record<Action, number>> = {};
   private samples = 0;
@@ -283,15 +296,49 @@ export class Engine {
 
   toMenu() {
     this.token++;
+    this.mode = "ai";
     this.p = mkFighter(PLAYER_START, 1);
     this.e = mkFighter(ENEMY_START, -1);
+    this.eLook = ENEMY_LOOKS.oni;
     this.particles = [];
     this.slow = 1;
-    this.patch({ screen: "menu", phase: "idle", result: null, banner: null, step: -1 });
+    this.patch({ screen: "menu", phase: "idle", result: null, banner: null, step: -1, netPeer: null, mode: "ai" });
+  }
+
+  /** Сетевая дуэль: противник — живой игрок (красный ронин). */
+  startNetMatch(peerName: string) {
+    const tok = ++this.token;
+    this.mode = "net";
+    this.p = mkFighter(PLAYER_START, 1);
+    this.e = mkFighter(ENEMY_START, -1);
+    this.eLook = RIVAL_RONIN_LOOK;
+    this.particles = [];
+    this.round = 1;
+    this.stats = freshStats();
+    this.netEnemyHand = [];
+    this.slow = 1;
+    this.patch({
+      screen: "play",
+      phase: "idle",
+      mode: "net",
+      netPeer: peerName,
+      personality: "mirror",
+      round: 1,
+      pHp: MAX_HP,
+      eHp: MAX_HP,
+      step: -1,
+      enemyRevealed: 0,
+      enemyPlan: [null, null, null],
+      playerPlan: [null, null, null],
+      result: null,
+      stats: { ...this.stats },
+    });
+    this.say(`Сетевая дуэль с игроком ${peerName}. На план — 20 секунд!`);
+    this.startExchange(tok);
   }
 
   fight(plan: Action[]) {
-    if (this.ui.phase !== "plan") return;
+    if (this.ui.phase !== "plan" || this.mode !== "ai") return;
     const tok = this.token;
     this.pPlan = plan;
     this.patch({ phase: "thinking", playerPlan: [...plan], enemyPlan: [null, null, null], enemyRevealed: 0 });
@@ -301,8 +348,16 @@ export class Engine {
   }
 
   private startExchange(tok: number) {
+    this.planCommitted = false;
+    this.netEnemyPlan = null;
     this.playerHand = rollHand();
-    this.enemyHand = rollHand();
+    if (this.mode === "net") {
+      // свою руку показываем сопернику; его руку получим по сети
+      this.netSend({ t: "hand", hand: [...this.playerHand] });
+      this.enemyHand = [...this.netEnemyHand];
+    } else {
+      this.enemyHand = rollHand();
+    }
     this.patch({
       phase: "plan",
       step: -1,
@@ -348,6 +403,11 @@ export class Engine {
     }
     this.samples++;
 
+    await this.beginExchange(tok);
+  }
+
+  /** Общая часть обмена: оба плана уже известны — разыгрываем шаги. */
+  private async beginExchange(tok: number) {
     // precompute all three steps
     const outcomes: StepResult[] = [];
     let pp = this.p.pos;
@@ -374,10 +434,52 @@ export class Engine {
     this.stats.exchanges++;
     this.round++;
     this.patch({ stats: { ...this.stats } });
-    this.say("Обмен завершён. Оба стоят — планируй снова!");
+    this.say(
+      this.mode === "net"
+        ? "Обмен завершён. Оба стоят — 20 секунд на новый план!"
+        : "Обмен завершён. Оба стоят — планируй снова!"
+    );
     await this.wait(650, tok);
     if (tok !== this.token) return;
     this.startExchange(tok);
+  }
+
+  // ---------------- сетевая дуэль ----------------
+
+  /** Отправить свой план (кнопка «БОЙ!» или тайм-аут). */
+  commitNetPlan(plan: Action[]) {
+    if (this.ui.phase !== "plan" || this.planCommitted) return;
+    const tok = this.token;
+    this.planCommitted = true;
+    this.pPlan = plan;
+    this.patch({ phase: "thinking", playerPlan: [...plan] });
+    this.netSend({ t: "plan", plan: [...plan] });
+    if (this.netEnemyPlan) {
+      this.say("Оба плана готовы — клинки решают!");
+      this.ePlan = this.netEnemyPlan;
+      this.beginExchange(tok);
+    } else {
+      this.say("План отправлен. Ждём замысел соперника...");
+    }
+  }
+
+  /** Соперник прислал свою руку кубиков. */
+  receiveNetHand(hand: Action[]) {
+    this.netEnemyHand = [...hand];
+    this.patch({ enemyHand: [...hand] });
+  }
+
+  /** Соперник прислал свой план. */
+  receiveNetPlan(plan: Action[]) {
+    if (this.netEnemyPlan) return; // уже получили в этом раунде
+    this.netEnemyPlan = [...plan];
+    if (this.planCommitted) {
+      this.say("Оба плана готовы — клинки решают!");
+      this.ePlan = this.netEnemyPlan;
+      this.beginExchange(this.token);
+    } else {
+      this.say("Соперник готов! Успейте выбрать 3 кубика.");
+    }
   }
 
   // ---------------- per-step choreography ----------------

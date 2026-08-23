@@ -1,6 +1,7 @@
-export type Action = "fwd" | "back" | "jump" | "dodge" | "strike" | "block";
+/** wait — внутреннее действие «ничего не делать» (тайм-аут в сетевой игре). */
+export type Action = "fwd" | "back" | "jump" | "dodge" | "strike" | "block" | "wait";
 
-export const ACTIONS: Action[] = ["fwd", "back", "jump", "dodge", "strike", "block"];
+export const ACTIONS: Exclude<Action, "wait">[] = ["fwd", "back", "jump", "dodge", "strike", "block"];
 
 export interface ActionMeta {
   name: string;
@@ -59,6 +60,14 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     dark: "#4a5578",
     desc: "Гасит удар и отбрасывает атакующего назад. Бесполезен против прыжка.",
     tip: "Ставь первым, контратакуй вторым.",
+  },
+  wait: {
+    name: "Стойка",
+    short: "СТОЙ",
+    color: "#8f96c4",
+    dark: "#1c2244",
+    desc: "Боец застыл без действия — время на план вышло.",
+    tip: "Не успел за 20 секунд — стоишь и ждёшь.",
   },
 };
 
