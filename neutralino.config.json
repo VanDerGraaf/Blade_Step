@@ -1,0 +1,27 @@
+{
+  "applicationId": "js.bladestep.duel",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "documentRoot": "/dist/",
+  "url": "/",
+  "enableNativeAPI": false,
+  "modes": {
+    "window": {
+      "title": "Blade Step",
+      "width": 1280,
+      "height": 820,
+      "minWidth": 960,
+      "minHeight": 640,
+      "center": true,
+      "enableInspector": false,
+      "fullScreen": false,
+      "alwaysOnTop": false
+    }
+  },
+  "cli": {
+    "binaryName": "neutralino",
+    "resourcesPath": "/dist/",
+    "binaryVersion": "5.6.0",
+    "clientVersion": "5.6.0"
+  }
+}
