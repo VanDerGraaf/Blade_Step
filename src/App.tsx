@@ -13,7 +13,7 @@ import {
   SPECIAL_ACTIONS,
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
-import { net, NetMsg, Transport } from "./game/net";
+import { HAS_WEBRTC, IS_STANDALONE, net, NetMsg, Transport } from "./game/net";
 import { FighterPreview } from "./components/FighterPreview";
 import type { FighterKind } from "./game/sprites";
 
@@ -375,18 +375,30 @@ function MenuScreen({
                     netPanel.transport === "online" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
                   }`}
                 >
-                  ИНТЕРНЕТ · БЕЗ СЕРВЕРА
+                  {IS_STANDALONE ? "СОЕДИНЕНИЕ ПО КОДУ" : "ИНТЕРНЕТ · БЕЗ СЕРВЕРА"}
                 </button>
                 <button
-                  onClick={() => netPanel.setTransport("local")}
-                  disabled={netPanel.state !== "off"}
+                  onClick={() => !IS_STANDALONE && netPanel.setTransport("local")}
+                  disabled={netPanel.state !== "off" || IS_STANDALONE}
+                  title={IS_STANDALONE ? "Недоступно: окна приложения — отдельные процессы" : undefined}
                   className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
-                    netPanel.transport === "local" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
+                    IS_STANDALONE
+                      ? "bg-ink2 text-dim/40 cursor-not-allowed"
+                      : netPanel.transport === "local"
+                        ? "bg-[#0e6b69] text-paper"
+                        : "bg-ink2 text-dim"
                   }`}
                 >
-                  ДВЕ ВКЛАДКИ
+                  {IS_STANDALONE ? "ДВЕ ВКЛАДКИ (браузер)" : "ДВЕ ВКЛАДКИ"}
                 </button>
               </div>
+
+              {IS_STANDALONE && netPanel.state === "off" && (
+                <p className="font-body text-[9px] text-dim/80 leading-snug mb-2">
+                  Вы в приложении: два окна на этом ПК соединяются «по коду» — создайте дуэль в одном
+                  окне и вставьте код во втором. Работает и без интернета.
+                </p>
+              )}
 
               {netPanel.state === "off" && (
                 <div className="flex flex-col gap-1.5">
@@ -1100,8 +1112,15 @@ export default function App() {
     sfx.select();
     setNetError("");
     setJoinCode("");
-    if (netTransport === "local") net.hostLocal();
-    else net.hostOnline();
+    if (netTransport === "local" && !IS_STANDALONE) {
+      net.hostLocal();
+    } else {
+      if (!HAS_WEBRTC) {
+        setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
+        return;
+      }
+      net.hostOnline();
+    }
     setNetState("hosting");
   }, [netTransport]);
 
@@ -1121,6 +1140,10 @@ export default function App() {
 
   /** Гость (интернет): готовимся принять приглашение. */
   const guestStart = useCallback(() => {
+    if (!HAS_WEBRTC) {
+      setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
+      return;
+    }
     initAudio();
     sfx.select();
     setNetError("");

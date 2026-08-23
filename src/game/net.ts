@@ -28,6 +28,28 @@ export interface NetHooks {
 
 export type Transport = "online" | "local";
 
+/**
+ * Запущены ли мы как упакованное десктоп-приложение (Pake/Tauri), а не в обычном
+ * браузере. Важно: в приложении каждое окно — отдельный процесс, поэтому
+ * BroadcastChannel («две вкладки») между ними НЕ работает; соединяем окна по коду.
+ */
+export const IS_STANDALONE: boolean = (() => {
+  try {
+    const w = window as unknown as { __TAURI__?: unknown };
+    if (w.__TAURI__) return true;
+    const proto = window.location.protocol;
+    if (proto !== "http:" && proto !== "https:" && proto !== "file:") return true; // tauri://, asset://…
+    if (typeof navigator !== "undefined" && /pake|tauri/i.test(navigator.userAgent)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+})();
+
+/** Поддерживается ли WebRTC вообще (нужен безопасный контекст). */
+export const HAS_WEBRTC: boolean =
+  typeof RTCPeerConnection !== "undefined" && typeof RTCSessionDescription !== "undefined";
+
 const ABC = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 const RTC_CONFIG: RTCConfiguration = {
