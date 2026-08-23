@@ -10,6 +10,7 @@
 export type NetMsg =
   | { t: "hello"; name: string }
   | { t: "begin" }
+  | { t: "look"; look: string }
   | { t: "hand"; hand: string[] }
   | { t: "plan"; plan: string[] }
   | { t: "rematch" }

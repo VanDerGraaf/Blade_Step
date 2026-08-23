@@ -12,7 +12,7 @@ import {
   PLAYER_START,
 } from "./types";
 import { aiPlan, resolveStep, rollHand, StepResult } from "./logic";
-import { drawFighter, drawShadow, ENEMY_LOOKS, Look, PLAYER_LOOK, Pose, RIVAL_RONIN_LOOK } from "./sprites";
+import { drawFighter, drawShadow, ENEMY_LOOKS, FighterKind, Look, lookForKind, PLAYER_LOOK, Pose } from "./sprites";
 import { sfx } from "./audio";
 import type { NetMsg } from "./net";
 
@@ -156,7 +156,10 @@ export class Engine {
 
   private p = mkFighter(PLAYER_START, 1);
   private e = mkFighter(ENEMY_START, -1);
+  private pLook: Look = PLAYER_LOOK;
   private eLook: Look = ENEMY_LOOKS.oni;
+  private netMyKind: FighterKind = "ronin";
+  private netPeerKind: FighterKind = "ronin";
   private particles: Particle[] = [];
   private timers: Timer[] = [];
   private tweens: Tween[] = [];
@@ -269,6 +272,7 @@ export class Engine {
     const tok = ++this.token;
     this.p = mkFighter(PLAYER_START, 1);
     this.e = mkFighter(ENEMY_START, -1);
+    this.pLook = PLAYER_LOOK;
     this.eLook = ENEMY_LOOKS[PERSONALITY_KIND[pers]];
     this.particles = [];
     this.round = 1;
@@ -300,19 +304,23 @@ export class Engine {
     this.mode = "ai";
     this.p = mkFighter(PLAYER_START, 1);
     this.e = mkFighter(ENEMY_START, -1);
+    this.pLook = PLAYER_LOOK;
     this.eLook = ENEMY_LOOKS.oni;
     this.particles = [];
     this.slow = 1;
     this.patch({ screen: "menu", phase: "idle", result: null, banner: null, step: -1, netPeer: null, mode: "ai" });
   }
 
-  /** Сетевая дуэль: противник — живой игрок (красный ронин). */
-  startNetMatch(peerName: string) {
+  /** Сетевая дуэль: каждый играет выбранным в лобби бойцом. */
+  startNetMatch(peerName: string, myKind: FighterKind, peerKind: FighterKind) {
     const tok = ++this.token;
     this.mode = "net";
+    this.netMyKind = myKind;
+    this.netPeerKind = peerKind;
     this.p = mkFighter(PLAYER_START, 1);
     this.e = mkFighter(ENEMY_START, -1);
-    this.eLook = RIVAL_RONIN_LOOK;
+    this.pLook = lookForKind(myKind);
+    this.eLook = lookForKind(peerKind);
     this.particles = [];
     this.round = 1;
     this.stats = freshStats();
@@ -1073,7 +1081,7 @@ export class Engine {
     this.drawArena(ctx);
     this.drawFighterShadow(ctx, this.p);
     this.drawFighterShadow(ctx, this.e);
-    this.drawFighterBody(ctx, this.p, PLAYER_LOOK);
+    this.drawFighterBody(ctx, this.p, this.pLook);
     this.drawFighterBody(ctx, this.e, this.eLook);
     this.drawParticles(ctx);
 

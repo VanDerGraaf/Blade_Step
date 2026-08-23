@@ -14,6 +14,18 @@ import {
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
 import { net, NetMsg, Transport } from "./game/net";
+import { FighterPreview } from "./components/FighterPreview";
+import type { FighterKind } from "./game/sprites";
+
+/** Бойцы, доступные для выбора в сетевом лобби. */
+const FIGHTER_OPTIONS: { kind: FighterKind; name: string; color: string }[] = [
+  { kind: "ronin", name: "РОНИН", color: "#2a9d8f" },
+  { kind: "scarecrow", name: "БОЛВАНЧИК", color: "#c9a96e" },
+  { kind: "oni", name: "КРОВОЖАД", color: "#e63946" },
+  { kind: "guard", name: "СТРАЖ", color: "#aebbdd" },
+  { kind: "kitsune", name: "ЗЕРКАЛО", color: "#b57ff0" },
+  { kind: "shinobi", name: "ШИНОБИ", color: "#7ee081" },
+];
 import {
   ActionIcon,
   IconHeart,
@@ -698,6 +710,127 @@ function OverScreen({
 
 // ---------------------------------------------------------------- app
 
+function PreviewSlot({ kind, label, color }: { kind: FighterKind | null; label: string; color: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="w-[76px] h-[104px] border-[3px] border-[#070919] bg-ink2 flex items-end justify-center overflow-hidden">
+        {kind ? (
+          <FighterPreview kind={kind} size={64} />
+        ) : (
+          <span className="font-pixel text-[20px] text-[#39406e] mb-6">?</span>
+        )}
+      </div>
+      <span className="font-pixel text-[8px] leading-none" style={{ color: kind ? color : "#39406e" }}>
+        {kind ? FIGHTER_OPTIONS.find((o) => o.kind === kind)?.name ?? label : label}
+      </span>
+    </div>
+  );
+}
+
+function LobbyScreen({
+  myKind,
+  peerKind,
+  peerName,
+  onPick,
+  onStart,
+}: {
+  myKind: FighterKind | null;
+  peerKind: FighterKind | null;
+  peerName: string;
+  onPick: (k: FighterKind) => void;
+  onStart: () => void;
+}) {
+  const isHost = net.isHost;
+  const canStart = !!myKind && !!peerKind && myKind !== peerKind;
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl anim-rise">
+          <p className="font-pixel text-[8px] md:text-[9px] text-[#3ddad7] text-center mb-2 tracking-wider">
+            СЕТЕВАЯ ДУЭЛЬ · СОПЕРНИК: {peerName}
+          </p>
+          <h2
+            className="font-pixel text-center text-[22px] md:text-[28px] text-paper mb-5"
+            style={{ textShadow: "3px 3px 0 #000" }}
+          >
+            ВЫБОР БОЙЦА
+          </h2>
+
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-5">
+            {FIGHTER_OPTIONS.map((o) => {
+              const mine = myKind === o.kind;
+              const theirs = peerKind === o.kind;
+              return (
+                <button
+                  key={o.kind}
+                  onClick={() => onPick(o.kind)}
+                  disabled={theirs}
+                  className={`no-select relative flex flex-col items-center gap-1 px-1 pt-3 pb-1.5 border-[3px] border-[#070919] bg-ink2 transition-all duration-100 ${
+                    theirs ? "opacity-40 cursor-not-allowed" : "hover:bg-ink hover:-translate-y-0.5"
+                  } ${mine ? "bg-ink" : ""}`}
+                  style={
+                    mine
+                      ? { boxShadow: "inset 0 0 0 2px #ffc24b, 0 0 16px rgba(255,194,75,0.35)" }
+                      : theirs
+                        ? { boxShadow: `inset 0 0 0 2px ${o.color}` }
+                        : undefined
+                  }
+                  title={o.name}
+                >
+                  {mine && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 font-pixel text-[6px] bg-gold text-[#070919] px-1 py-px">
+                      ВЫ
+                    </span>
+                  )}
+                  {theirs && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 font-pixel text-[6px] bg-blood text-paper px-1 py-px whitespace-nowrap">
+                      СОПЕРНИК
+                    </span>
+                  )}
+                  <FighterPreview kind={o.kind} size={48} />
+                  <span className="font-pixel text-[7px] leading-none" style={{ color: o.color }}>
+                    {o.name}
+                  </span>
+                  <span className="font-body text-[8px] text-dim leading-none">{DICE_POOLS[o.kind].length} куб.</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-center gap-5 mb-5">
+            <PreviewSlot kind={myKind} label="ВЫ" color="#ffc24b" />
+            <span className="font-pixel text-[18px] text-blood" style={{ textShadow: "2px 2px 0 #000" }}>
+              VS
+            </span>
+            <PreviewSlot kind={peerKind} label={peerName} color="#ff5964" />
+          </div>
+
+          <div className="text-center">
+            {!myKind || !peerKind ? (
+              <p className="font-body text-[11px] text-dim mb-3">Оба игрока должны выбрать бойца…</p>
+            ) : myKind === peerKind ? (
+              <p className="font-body text-[11px] text-blood mb-3">Один боец на двоих — пусть кто-то сменит!</p>
+            ) : null}
+            {isHost ? (
+              <button
+                onClick={onStart}
+                disabled={!canStart}
+                className="px-btn no-select px-6 py-3 bg-gold text-[#070919] text-[12px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                НАЧАТЬ БОЙ
+              </button>
+            ) : (
+              <p className="font-pixel text-[9px] text-dim">
+                ЖДЁМ ХОСТА… <span className="anim-blink">▮</span>
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const engineRef = useRef<Engine | null>(null);
   if (!engineRef.current) engineRef.current = new Engine();
@@ -728,12 +861,22 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(20);
   const [oppWantsRematch, setOppWantsRematch] = useState(false);
   const [rematchSent, setRematchSent] = useState(false);
+  // лобби выбора бойца
+  const [myKind, setMyKind] = useState<FighterKind | null>(null);
+  const [peerKind, setPeerKind] = useState<FighterKind | null>(null);
+  const [lobby, setLobby] = useState(false);
   const myRematchRef = useRef(false);
   const oppRematchRef = useRef(false);
   const uiRef = useRef(ui);
   uiRef.current = ui;
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
+  const myKindRef = useRef<FighterKind | null>(null);
+  myKindRef.current = myKind;
+  const peerKindRef = useRef<FighterKind | null>(null);
+  peerKindRef.current = peerKind;
+  const netPeerNameRef = useRef("Соперник");
+  netPeerNameRef.current = netPeerName;
 
   const resetNetUi = useCallback(() => {
     setNetState("off");
@@ -745,6 +888,9 @@ export default function App() {
     setAnswerInput("");
     setNetError("");
     setNetPeerName("Соперник");
+    setMyKind(null);
+    setPeerKind(null);
+    setLobby(false);
     myRematchRef.current = false;
     oppRematchRef.current = false;
     setOppWantsRematch(false);
@@ -756,12 +902,37 @@ export default function App() {
     setPaused(false);
     engine.paused = false;
     setSlots([null, null, null]);
+    setLobby(false);
     myRematchRef.current = false;
     oppRematchRef.current = false;
     setOppWantsRematch(false);
     setRematchSent(false);
-    engine.startNetMatch(uiRef.current.netPeer ?? "Соперник");
+    engine.startNetMatch(
+      netPeerNameRef.current || "Соперник",
+      myKindRef.current ?? "ronin",
+      peerKindRef.current ?? "ronin"
+    );
   }, [engine]);
+
+  /** Выбор своего бойца в лобби (отправляется сопернику). */
+  const pickKind = useCallback((k: FighterKind) => {
+    if (peerKindRef.current === k) return; // этот боец занят соперником
+    initAudio();
+    sfx.select();
+    setMyKind(k);
+    net.send({ t: "look", look: k });
+  }, []);
+
+  /** Хост запускает бой из лобби, когда оба выбрали разных бойцов. */
+  const startFromLobby = useCallback(() => {
+    const me = myKindRef.current;
+    const foe = peerKindRef.current;
+    if (!me || !foe || me === foe) return;
+    initAudio();
+    sfx.fight();
+    net.send({ t: "begin" });
+    beginNetMatch();
+  }, [beginNetMatch]);
 
   useEffect(() => {
     engine.setListener((patch) => setUi((u) => ({ ...u, ...patch })));
@@ -789,20 +960,21 @@ export default function App() {
         setAnswerCode(code);
         setNetError("");
       },
-      onConnected: (_name: string, isHost: boolean) => {
+      onConnected: (_name: string, _isHost: boolean) => {
         setNetState("connected");
         setNetError("");
         sfx.win();
-        if (isHost) {
-          net.send({ t: "begin" });
-          window.setTimeout(beginNetMatch, 2200);
-        }
+        setLobby(true);
+        // если выбор уже был сделан — сообщить сопернику
+        if (myKindRef.current) net.send({ t: "look", look: myKindRef.current });
       },
       onMsg: (m: NetMsg) => {
         if (m.t === "hello") {
           setNetPeerName(m.name || "Соперник");
+        } else if (m.t === "look") {
+          setPeerKind(m.look as FighterKind);
         } else if (m.t === "begin") {
-          window.setTimeout(beginNetMatch, 1900);
+          window.setTimeout(beginNetMatch, 350);
         } else if (m.t === "hand") {
           engine.receiveNetHand(m.hand as Action[]);
         } else if (m.t === "plan") {
@@ -1408,7 +1580,13 @@ export default function App() {
         <OverScreen
           result={ui.result}
           stats={ui.stats}
-          enemyName={ui.mode === "net" ? "Соперник" : enemyMeta.name}
+          enemyName={
+            ui.mode === "net"
+              ? peerKind
+                ? FIGHTER_OPTIONS.find((o) => o.kind === peerKind)?.name ?? "Соперник"
+                : "Соперник"
+              : enemyMeta.name
+          }
           onRematch={ui.mode === "net" ? requestRematch : startMatch}
           onMenu={quitToMenu}
           rematchLabel={
@@ -1422,6 +1600,17 @@ export default function App() {
                   : "ПРЕДЛОЖИТЬ РЕВАНШ"
               : "РЕВАНШ"
           }
+        />
+      )}
+
+      {/* лобби выбора бойца (сетевая игра) */}
+      {lobby && netState === "connected" && (
+        <LobbyScreen
+          myKind={myKind}
+          peerKind={peerKind}
+          peerName={netPeerName}
+          onPick={pickKind}
+          onStart={startFromLobby}
         />
       )}
 

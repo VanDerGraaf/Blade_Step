@@ -72,6 +72,11 @@ export const RIVAL_RONIN_LOOK: Look = {
   gearSh: "#6b4f2e",
 };
 
+/** Палитра бойца по его виду (для лобби и сетевой игры). */
+export function lookForKind(kind: FighterKind): Look {
+  return kind === "ronin" ? PLAYER_LOOK : ENEMY_LOOKS[kind];
+}
+
 export const ENEMY_LOOKS: Record<Exclude<FighterKind, "ronin">, Look> = {
   scarecrow: {
     kind: "scarecrow",
