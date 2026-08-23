@@ -1,11 +1,11 @@
-// P2P networking for duels.
+// P2P networking for duels — zero third-party signaling services.
 //
-// Transport 1 — ONLINE (PeerJS/WebRTC): browsers meet on the free public
-//   signaling cloud (0.peerjs.com), then talk directly over a data channel.
-// Transport 2 — LOCAL (BroadcastChannel): two tabs of the same browser,
-//   zero servers, works offline. Same room-code flow as online.
-
-import Peer, { DataConnection } from "peerjs";
+// Transport "online" — pure WebRTC (no PeerJS):
+//   host creates an INVITE (SDP offer with bundled ICE candidates, compressed),
+//   hands it to a friend through any messenger; the friend returns an ANSWER
+//   (SDP answer). Two pastes — and the data channel runs straight between the
+//   two browsers. Works over the internet (STUN for NAT traversal).
+// Transport "local" — BroadcastChannel: two tabs of the same browser, offline.
 
 export type NetMsg =
   | { t: "hello"; name: string }
@@ -16,28 +16,25 @@ export type NetMsg =
   | { t: "quit" };
 
 export interface NetHooks {
-  onCode?: (code: string) => void; // host got its room code
+  onCode?: (code: string) => void; // local mode: room code
+  onInvite?: (code: string) => void; // online: host invite ready
+  onAnswer?: (code: string) => void; // online: guest answer ready
   onConnected: (peerName: string, isHost: boolean) => void;
   onMsg: (m: NetMsg) => void;
-  onDrop: () => void; // opponent left / connection lost
+  onDrop: () => void;
   onError: (msg: string) => void;
-  onRetry?: (attempt: number, of: number) => void; // online signaling retry
 }
 
 export type Transport = "online" | "local";
 
-const ID_PREFIX = "bladestep-duel-v2-";
 const ABC = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-const PEER_CONFIG = {
-  debug: 2, // диагностика PeerJS в консоли DevTools
-  config: {
-    iceServers: [
-      { urls: "stun:stun.l.google.com:19302" },
-      { urls: "stun:stun1.l.google.com:19302" },
-      { urls: "stun:global.stun.twilio.com:3478" },
-    ],
-  },
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:global.stun.twilio.com:3478" },
+  ],
 };
 
 function randCode(): string {
@@ -46,29 +43,66 @@ function randCode(): string {
   return s;
 }
 
-// ---- пользовательский сигнальный сервер (npx peerjs --port 9000) ----
-const LS_SERVER = "bladestep-server";
-export interface ServerCfg {
-  host: string;
-  port: number;
-}
+// ------------------------------------------------ SDP <-> short text code
 
-function loadCustomServer(): ServerCfg | null {
-  try {
-    const raw = localStorage.getItem(LS_SERVER);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as ServerCfg;
-    if (p && typeof p.host === "string" && p.host && typeof p.port === "number") return p;
-  } catch {
-    /* noop */
+function bytesToB64(bytes: Uint8Array): string {
+  let s = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    s += String.fromCharCode(...Array.from(bytes.subarray(i, i + chunk)));
   }
-  return null;
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-const onlineFailHint = (server: string) =>
-  `Не удалось связаться с сервером знакомств (${server}). ` +
-  "Причины: нет интернета, сервер недоступен из вашей сети или среда блокирует внешние соединения. " +
-  "Выход: режим «ДВЕ ВКЛАДКИ» (без серверов) или свой сервер — npx peerjs --port 9000.";
+function b64ToBytes(b: string): Uint8Array {
+  const s = atob(b.replace(/-/g, "+").replace(/_/g, "/"));
+  const u = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+  return u;
+}
+
+/** Сжимаем SDP (deflate), чтобы код влезал в сообщение мессенджера. */
+async function pack(text: string): Promise<string> {
+  const CS = (globalThis as unknown as { CompressionStream?: new (f: string) => unknown }).CompressionStream;
+  if (!CS) return "R" + bytesToB64(new TextEncoder().encode(text));
+  try {
+    const cs = new CS("deflate");
+    const out = new Blob([text]).stream().pipeThrough(cs as never);
+    const buf = await new Response(out).arrayBuffer();
+    return "C" + bytesToB64(new Uint8Array(buf));
+  } catch {
+    return "R" + bytesToB64(new TextEncoder().encode(text));
+  }
+}
+
+async function unpack(code: string): Promise<string> {
+  const clean = code.replace(/[^A-Za-z0-9+/_-]/g, "");
+  if (clean.length < 8) throw new Error("too short");
+  const kind = clean[0];
+  const bytes = b64ToBytes(clean.slice(1));
+  const DS = (globalThis as unknown as { DecompressionStream?: new (f: string) => unknown }).DecompressionStream;
+  if (kind === "C" && DS) {
+    const ds = new DS("deflate");
+    const out = new Blob([bytes.buffer as ArrayBuffer]).stream().pipeThrough(ds as never);
+    return await new Response(out).text();
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+/** Ждём, пока все ICE-кандидаты соберутся в SDP (иначе код не сработает). */
+function waitIce(pc: RTCPeerConnection): Promise<void> {
+  return new Promise((res) => {
+    if (pc.iceGatheringState === "complete") return res();
+    const check = () => {
+      if (pc.iceGatheringState === "complete") {
+        pc.removeEventListener("icegatheringstatechange", check);
+        res();
+      }
+    };
+    pc.addEventListener("icegatheringstatechange", check);
+    window.setTimeout(res, 4000); // fallback: отправим, что успели
+  });
+}
 
 type LMsg =
   | { k: "hello-host"; code: string; from: string }
@@ -78,9 +112,12 @@ type LMsg =
   | { k: "bye"; code: string; from: string };
 
 class NetSession {
-  private peer: Peer | null = null;
-  private conn: DataConnection | null = null;
   private hooks: NetHooks | null = null;
+  private pc: RTCPeerConnection | null = null;
+  private dc: RTCDataChannel | null = null;
+  private connectedFired = false;
+  private dcTimer = 0;
+
   private bc: BroadcastChannel | null = null;
   private tabId = Math.random().toString(36).slice(2);
   private roomCode = "";
@@ -91,168 +128,126 @@ class NetSession {
   private watchTimer = 0;
   private probeTimer = 0;
   private lastSeen = 0;
-  private attempts = 0;
-  private pendingHostCode = "";
-  private pendingJoinCode = "";
-  private custom: ServerCfg | null = loadCustomServer();
+
   transport: Transport = "online";
   isHost = false;
 
-  /** Текущий сигнальный сервер (null = публичное облако 0.peerjs.com). */
-  getCustomServer(): ServerCfg | null {
-    return this.custom;
-  }
-
-  /** Задать свой сервер из строки «host:port» (порт по умолчанию 9000). Пустая строка — сброс на облако. */
-  setCustomServer(raw: string): ServerCfg | null {
-    const t = raw.trim();
-    if (!t) {
-      this.custom = null;
-      try {
-        localStorage.removeItem(LS_SERVER);
-      } catch {
-        /* noop */
-      }
-      return null;
-    }
-    const [host, portStr] = t.split(":");
-    const port = portStr ? parseInt(portStr, 10) : 9000;
-    if (!host || Number.isNaN(port) || port <= 0 || port > 65535) return this.custom;
-    this.custom = { host, port };
-    try {
-      localStorage.setItem(LS_SERVER, JSON.stringify(this.custom));
-    } catch {
-      /* noop */
-    }
-    return this.custom;
-  }
-
   get connected(): boolean {
-    return this.transport === "local" ? this.localConnected : this.conn?.open ?? false;
+    return this.transport === "local" ? this.localConnected : this.connectedFired;
   }
 
   setHooks(hooks: NetHooks) {
     this.hooks = hooks;
   }
 
-  // ------------------------------------------------ online (PeerJS)
+  // ------------------------------------------------ online (pure WebRTC)
 
+  /** Хост: создаём приглашение (SDP offer). */
   hostOnline() {
     this.reset();
     this.transport = "online";
     this.isHost = true;
-    this.attempts = 0;
-    this.openHost(null);
+    const pc = this.newPc();
+    this.dc = pc.createDataChannel("duel", { ordered: true });
+    this.bindDc(this.dc);
+    (async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitIce(pc);
+      if (!pc.localDescription) throw new Error("no offer");
+      const code = await pack(JSON.stringify(pc.localDescription));
+      this.hooks?.onInvite?.(code);
+    })().catch(() => this.hooks?.onError("Не удалось создать приглашение. Попробуйте ещё раз."));
   }
 
-  joinOnline(code: string) {
+  /** Хост: вставляем ответ друга (SDP answer) — после этого канал откроется. */
+  acceptAnswer(code: string) {
+    if (!this.pc || !this.isHost) return;
+    const pc = this.pc;
+    (async () => {
+      const desc = JSON.parse(await unpack(code)) as RTCSessionDescriptionInit;
+      await pc.setRemoteDescription(desc);
+    })().catch(() =>
+      this.hooks?.onError("Код ответа не читается. Вставьте его целиком, без лишних символов.")
+    );
+  }
+
+  /** Гость: готовимся принять приглашение. */
+  joinOnline() {
     this.reset();
     this.transport = "online";
     this.isHost = false;
-    this.attempts = 0;
-    this.pendingJoinCode = code.trim().toUpperCase();
-    this.openJoin();
+    const pc = this.newPc();
+    pc.ondatachannel = (e) => {
+      this.dc = e.channel;
+      this.bindDc(e.channel);
+    };
   }
 
-  private openHost(code: string | null) {
-    this.pendingHostCode = code ?? randCode();
-    this.createPeer(ID_PREFIX + this.pendingHostCode.toLowerCase(), () => {
-      this.attempts = 0;
-      this.hooks?.onCode?.(this.pendingHostCode);
-      this.peer!.on("connection", (conn) => {
-        if (this.conn?.open) {
-          conn.close(); // комната занята
-          return;
-        }
-        this.bindConn(conn);
-      });
-    });
+  /** Гость: вставляем приглашение хоста, создаём ответ. */
+  createAnswer(invite: string) {
+    if (!this.pc || this.isHost) return;
+    const pc = this.pc;
+    (async () => {
+      const desc = JSON.parse(await unpack(invite)) as RTCSessionDescriptionInit;
+      await pc.setRemoteDescription(desc);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitIce(pc);
+      if (!pc.localDescription) throw new Error("no answer");
+      const code = await pack(JSON.stringify(pc.localDescription));
+      this.hooks?.onAnswer?.(code);
+    })().catch(() =>
+      this.hooks?.onError("Код приглашения не читается. Вставьте его целиком, без лишних символов.")
+    );
   }
 
-  private openJoin() {
-    this.createPeer(undefined, () => {
-      this.attempts = 0;
-      const conn = this.peer!.connect(ID_PREFIX + this.pendingJoinCode.toLowerCase(), { reliable: true });
-      this.bindConn(conn);
-    });
-  }
-
-  private createPeer(id: string | undefined, onOpen: () => void) {
-    try {
-      this.peer?.destroy();
-    } catch { /* noop */ }
-    const opts = this.custom
-      ? {
-          ...PEER_CONFIG,
-          host: this.custom.host,
-          port: this.custom.port,
-          path: "/",
-          secure: false,
-        }
-      : PEER_CONFIG;
-    this.peer = id ? new Peer(id, opts) : new Peer(opts);
-    this.peer.on("open", onOpen);
-    this.peer.on("disconnected", () => {
-      try {
-        this.peer?.reconnect();
-      } catch { /* noop */ }
-    });
-    this.peer.on("error", (err) => this.handlePeerError(err as Error & { type?: string }));
-  }
-
-  private bindConn(conn: DataConnection) {
-    this.conn = conn;
-    const openTimeout = window.setTimeout(() => {
-      if (!conn.open) {
-        this.hooks?.onError("Соперник не ответил вовремя. Проверьте код комнаты.");
-        this.teardown();
+  private newPc(): RTCPeerConnection {
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    this.pc = pc;
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState;
+      if (s === "connected") this.fireConnected();
+      else if (s === "failed" || s === "closed") this.drop();
+      else if (s === "disconnected") {
+        window.clearTimeout(this.dcTimer);
+        this.dcTimer = window.setTimeout(() => {
+          if (pc.connectionState === "disconnected") this.drop();
+        }, 4000);
       }
-    }, 15000);
-    conn.on("open", () => {
-      window.clearTimeout(openTimeout);
-      this.send({ t: "hello", name: "Ронин" });
-      this.hooks?.onConnected("Соперник", this.isHost);
-    });
-    conn.on("data", (data) => {
-      const m = data as NetMsg;
-      if (m && typeof m === "object" && "t" in m) this.hooks?.onMsg(m);
-    });
-    conn.on("close", () => {
-      this.hooks?.onDrop();
-      this.teardown();
-    });
-    conn.on("error", () => {
-      this.hooks?.onDrop();
-      this.teardown();
-    });
+    };
+    return pc;
   }
 
-  private handlePeerError(err: Error & { type?: string }) {
-    const t = err?.type ?? "";
-    // код комнаты уже занят — пересоздаём с новым кодом
-    if (t === "unavailable-id" && this.isHost && !this.conn?.open) {
-      this.hooks?.onRetry?.(1, 3);
-      this.openHost(null);
-      return;
-    }
-    const retriable = ["network", "server-error", "socket-error", "socket-closed"];
-    if (retriable.includes(t) && this.attempts < 3 && !this.conn?.open) {
-      this.attempts++;
-      this.hooks?.onRetry?.(this.attempts, 3);
-      window.setTimeout(() => {
-        if (this.transport !== "online") return;
-        if (this.isHost) this.openHost(this.pendingHostCode);
-        else this.openJoin();
-      }, 900 * this.attempts);
-      return;
-    }
-    if (t === "peer-unavailable") {
-      this.hooks?.onError("Комната с таким кодом не найдена. Проверьте код.");
-    } else {
-      const srv = this.custom ? `${this.custom.host}:${this.custom.port}` : "0.peerjs.com";
-      this.hooks?.onError(onlineFailHint(srv));
-    }
-    this.softReset();
+  private bindDc(dc: RTCDataChannel) {
+    dc.onopen = () => {
+      this.fireConnected();
+      this.send({ t: "hello", name: "Ронин" });
+    };
+    dc.onmessage = (e) => {
+      if (typeof e.data !== "string") return;
+      try {
+        const m = JSON.parse(e.data) as NetMsg;
+        if (m && typeof m === "object" && "t" in m) this.hooks?.onMsg(m);
+      } catch {
+        /* noop */
+      }
+    };
+    dc.onclose = () => {
+      if (this.connectedFired) this.drop();
+    };
+  }
+
+  private fireConnected() {
+    if (this.connectedFired) return;
+    this.connectedFired = true;
+    this.hooks?.onConnected("Соперник", this.isHost);
+  }
+
+  private drop() {
+    if (!this.connectedFired && !this.pc) return;
+    this.hooks?.onDrop();
+    this.teardown();
   }
 
   // ------------------------------------------------ local (BroadcastChannel)
@@ -282,7 +277,6 @@ class NetSession {
     this.localRole = "guest";
     this.roomCode = code.trim().toUpperCase();
     this.openChannel();
-    // стучимся в комнату, пока хост не примет
     this.lastSeen = performance.now();
     this.bc?.postMessage({ k: "hello-host", code: this.roomCode, from: this.tabId } satisfies LMsg);
     this.probeTimer = window.setInterval(() => {
@@ -360,19 +354,29 @@ class NetSession {
 
   send(m: NetMsg) {
     if (this.transport === "local") {
-      if (this.bc && this.localConnected)
-        this.bc.postMessage({ k: "msg", code: this.roomCode, from: this.tabId, m } satisfies LMsg);
-    } else if (this.conn?.open) {
-      this.conn.send(m);
+      if (this.localConnected) {
+        this.bc?.postMessage({ k: "msg", code: this.roomCode, from: this.tabId, m } satisfies LMsg);
+      }
+      return;
     }
+    if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(m));
   }
 
   private softReset() {
+    window.clearTimeout(this.dcTimer);
     try {
-      this.peer?.destroy();
-    } catch { /* noop */ }
-    this.peer = null;
-    this.conn = null;
+      this.dc?.close();
+    } catch {
+      /* noop */
+    }
+    try {
+      this.pc?.close();
+    } catch {
+      /* noop */
+    }
+    this.dc = null;
+    this.pc = null;
+    this.connectedFired = false;
   }
 
   private reset() {
@@ -380,29 +384,25 @@ class NetSession {
   }
 
   teardown() {
-    if (this.bc) {
+    if (this.transport === "local" && this.bc) {
+      if (this.localConnected) {
+        this.bc.postMessage({ k: "bye", code: this.roomCode, from: this.tabId } satisfies LMsg);
+      }
+      window.clearInterval(this.hbTimer);
+      window.clearInterval(this.watchTimer);
+      window.clearInterval(this.probeTimer);
       try {
-        if (this.localConnected)
-          this.bc.postMessage({ k: "bye", code: this.roomCode, from: this.tabId } satisfies LMsg);
         this.bc.close();
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
+      this.bc = null;
+      this.localConnected = false;
+      this.guestId = null;
+      this.localRole = null;
+      this.roomCode = "";
     }
-    window.clearInterval(this.hbTimer);
-    window.clearInterval(this.watchTimer);
-    window.clearInterval(this.probeTimer);
-    try {
-      this.conn?.close();
-    } catch { /* noop */ }
-    try {
-      this.peer?.destroy();
-    } catch { /* noop */ }
-    this.bc = null;
-    this.conn = null;
-    this.peer = null;
-    this.guestId = null;
-    this.localRole = null;
-    this.localConnected = false;
-    this.attempts = 0;
+    this.softReset();
   }
 }
 

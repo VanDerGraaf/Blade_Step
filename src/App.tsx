@@ -11,7 +11,6 @@ import {
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
 import { net, NetMsg, Transport } from "./game/net";
-import { detectLanIp, detectPublicIp } from "./game/netutil";
 import {
   ActionIcon,
   IconHeart,
@@ -197,41 +196,30 @@ function ThreatSkulls({ n, color }: { n: number; color: string }) {
 
 interface NetPanelProps {
   state: "off" | "hosting" | "joining" | "connected";
-  code: string;
+  code: string; // local room code
   join: string;
   setJoin: (v: string) => void;
   error: string;
   transport: Transport;
   setTransport: (t: Transport) => void;
-  onCreate: () => void;
-  onJoin: () => void;
+  onCreate: () => void; // host (both transports)
+  onJoin: () => void; // guest, local transport
   onCancel: () => void;
-  serverLabel: string;
-  serverInput: string;
-  setServerInput: (v: string) => void;
-  onApplyServer: () => void;
-  onLocalPc: () => void;
-  ipLan: string | null;
-  ipPub: string | null;
+  // pure WebRTC (online transport)
+  invite: string;
+  answer: string;
+  inviteInput: string;
+  setInviteInput: (v: string) => void;
+  answerInput: string;
+  setAnswerInput: (v: string) => void;
+  onGuestStart: () => void;
+  onAcceptAnswer: () => void;
+  onMakeAnswer: () => void;
   copied: string | null;
   onCopy: (text: string, key: string) => void;
 }
 
-/** Моноширинный чип с кнопкой «скопировать» и живой обратной связью. */
-function CopyChip({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
-  return (
-    <button
-      onClick={onCopy}
-      title="Скопировать"
-      className={`inline-flex items-center gap-1 align-middle px-1.5 py-px border-2 border-[#070919] font-body text-[10px] whitespace-nowrap transition-colors duration-100 ${
-        copied ? "bg-[#2a9d8f] text-[#062521]" : "bg-ink2 text-[#3ddad7] hover:bg-ink"
-      }`}
-    >
-      {text}
-      <span className="font-pixel text-[6px] opacity-80">{copied ? "ГОТОВО" : "⧉"}</span>
-    </button>
-  );
-}
+
 
 function MenuScreen({
   pers,
@@ -345,7 +333,7 @@ function MenuScreen({
                     netPanel.transport === "online" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
                   }`}
                 >
-                  ИНТЕРНЕТ
+                  ИНТЕРНЕТ · БЕЗ СЕРВЕРА
                 </button>
                 <button
                   onClick={() => netPanel.setTransport("local")}
@@ -358,72 +346,62 @@ function MenuScreen({
                 </button>
               </div>
 
-              {netPanel.transport === "online" && netPanel.state === "off" && (
-                <div className="mb-1.5">
-                  <div className="flex items-center gap-1">
-                    <span className="font-pixel text-[7px] text-dim whitespace-nowrap">СЕРВЕР</span>
-                    <input
-                      value={netPanel.serverInput}
-                      onChange={(e) => netPanel.setServerInput(e.target.value)}
-                      placeholder={netPanel.serverLabel}
-                      className="font-body flex-1 min-w-0 px-2 py-1 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[10px] outline-none focus:border-[#3ddad7]"
-                    />
-                    <button
-                      onClick={netPanel.onLocalPc}
-                      title="Сервер знакомств запущен на этом компьютере (npx peerjs --port 9000)"
-                      className="px-btn no-select px-2 py-1 bg-[#0e6b69] text-paper text-[7px]"
-                    >
-                      НА ПК
-                    </button>
-                    <button
-                      onClick={netPanel.onApplyServer}
-                      className="px-btn no-select px-2 py-1 bg-ink2 text-dim text-[7px]"
-                    >
-                      OK
-                    </button>
-                  </div>
-                  <p className="font-body text-[8px] text-dim/70 mt-0.5 leading-tight">
-                    Знакомство: <span className="text-[#3ddad7]">{netPanel.serverLabel}</span>. Если облако закрыто — запустите{" "}
-                    <span className="text-paper">npx peerjs --port 9000</span> на одной машине и введите её{" "}
-                    <span className="text-paper">IP:9000</span> (дуэль по локальной сети, работает без интернета).
-                  </p>
-                </div>
-              )}
-
               {netPanel.state === "off" && (
                 <div className="flex flex-col gap-1.5">
-                  <button
-                    onClick={netPanel.onCreate}
-                    className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
-                  >
-                    СОЗДАТЬ КОМНАТУ
-                  </button>
-                  <div className="flex gap-1.5">
-                    <input
-                      value={netPanel.join}
-                      onChange={(e) => netPanel.setJoin(e.target.value.toUpperCase().slice(0, 4))}
-                      placeholder="КОД"
-                      className="font-pixel flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-[0.3em] text-center placeholder:text-[#39406e] placeholder:tracking-normal outline-none focus:border-[#3ddad7]"
-                    />
-                    <button
-                      onClick={netPanel.onJoin}
-                      className="px-btn no-select px-4 py-2 bg-panel text-paper text-[10px]"
-                    >
-                      ВОЙТИ
-                    </button>
-                  </div>
+                  {netPanel.transport === "online" ? (
+                    <>
+                      <p className="font-body text-[9px] text-dim/80 leading-snug">
+                        Чистый WebRTC — без PeerJS и без серверов. Обменяйтесь двумя кодами в любом
+                        мессенджере — и канал станет прямым: браузер ↔ браузер.
+                      </p>
+                      <button
+                        onClick={netPanel.onCreate}
+                        className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
+                      >
+                        СОЗДАТЬ ДУЭЛЬ (ХОСТ)
+                      </button>
+                      <button
+                        onClick={netPanel.onGuestStart}
+                        className="px-btn no-select w-full py-2 bg-panel text-paper text-[10px] tracking-wider"
+                      >
+                        ПРИСОЕДИНИТЬСЯ (ГОСТЬ)
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={netPanel.onCreate}
+                        className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
+                      >
+                        СОЗДАТЬ КОМНАТУ
+                      </button>
+                      <div className="flex gap-1.5">
+                        <input
+                          value={netPanel.join}
+                          onChange={(e) => netPanel.setJoin(e.target.value.toUpperCase().slice(0, 4))}
+                          placeholder="КОД"
+                          className="font-pixel flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-[0.3em] text-center placeholder:text-[#39406e] placeholder:tracking-normal outline-none focus:border-[#3ddad7]"
+                        />
+                        <button
+                          onClick={netPanel.onJoin}
+                          className="px-btn no-select px-4 py-2 bg-panel text-paper text-[10px]"
+                        >
+                          ВОЙТИ
+                        </button>
+                      </div>
+                      <p className="font-body text-[9px] text-dim/70 leading-tight">
+                        Один игрок создаёт комнату, второй открывает вкладку этого же браузера и входит
+                        по коду. Работает без интернета.
+                      </p>
+                    </>
+                  )}
                   {netPanel.error && (
                     <p className="font-body text-[10px] text-blood leading-tight">{netPanel.error}</p>
                   )}
-                  <p className="font-body text-[9px] text-dim/70 leading-tight">
-                    {netPanel.transport === "online"
-                      ? "Друг создаёт комнату и диктует код — вы входите по нему. Нужен интернет и доступ к 0.peerjs.com."
-                      : "Один игрок создаёт комнату, второй открывает вкладку этого же браузера и входит по коду. Работает без интернета."}
-                  </p>
                 </div>
               )}
 
-              {netPanel.state === "hosting" && (
+              {netPanel.state === "hosting" && netPanel.transport === "local" && (
                 <div className="text-center">
                   <p className="font-body text-[10px] text-dim mb-1">Код комнаты:</p>
                   <button
@@ -440,60 +418,9 @@ function MenuScreen({
                       <span className="text-dim/70">клик по коду — скопировать</span>
                     )}
                   </p>
-
-                  {netPanel.transport === "local" ? (
-                    <p className="font-body text-[10px] text-dim mb-2">
-                      Откройте вторую вкладку этой страницы и введите код. Ждём… <span className="anim-blink">▮</span>
-                    </p>
-                  ) : netPanel.serverLabel.includes("0.peerjs.com") ? (
-                    <p className="font-body text-[10px] text-dim mb-2">
-                      Передайте код второму игроку — сервер общий (облако), IP не нужен. Ждём…{" "}
-                      <span className="anim-blink">▮</span>
-                    </p>
-                  ) : (
-                    (() => {
-                      const port = netPanel.serverLabel.split(":")[1] || "9000";
-                      const lanAddr = `${netPanel.ipLan ?? "ВАШ-IP"}:${port}`;
-                      const pubAddr = `${netPanel.ipPub ?? "ПУБЛИЧНЫЙ-IP"}:${port}`;
-                      return (
-                        <div className="text-left px-2 py-1.5 mb-2 bg-ink2 border-2 border-[#070919]">
-                          <p className="font-pixel text-[7px] text-[#3ddad7] mb-1.5">
-                            ПРИГЛАСИТЕ ПО ВАШЕМУ IP
-                          </p>
-                          <p className="font-body text-[10px] text-dim leading-relaxed">
-                            Друг вводит в поле «СЕРВЕР»{" "}
-                            <CopyChip
-                              text={lanAddr}
-                              copied={netPanel.copied === "lan"}
-                              onCopy={() => netPanel.onCopy(lanAddr, "lan")}
-                            />{" "}
-                            (одна сеть) или{" "}
-                            <CopyChip
-                              text={pubAddr}
-                              copied={netPanel.copied === "pub"}
-                              onCopy={() => netPanel.onCopy(pubAddr, "pub")}
-                            />{" "}
-                            (интернет), затем код{" "}
-                            <CopyChip
-                              text={netPanel.code}
-                              copied={netPanel.copied === "code2"}
-                              onCopy={() => netPanel.onCopy(netPanel.code, "code2")}
-                            />
-                          </p>
-                          <p className="font-body text-[9px] text-dim/70 mt-1 leading-snug">
-                            Ваш IP: сеть — <span className="text-paper">{netPanel.ipLan ?? "не определился (ipconfig / ifconfig)"}</span>
-                            {" · "}интернет — <span className="text-paper">{netPanel.ipPub ?? "—"}</span>
-                            <br />
-                            Сервер <span className="text-[#3ddad7]">npx peerjs --port {port}</span> на вашей машине должен
-                            оставаться запущенным.
-                          </p>
-                        </div>
-                      );
-                    })()
-                  )}
-
-                  <p className="font-body text-[9px] text-dim mb-2">
-                    Ждём второго бойца… <span className="anim-blink">▮</span>
+                  <p className="font-body text-[10px] text-dim mb-2">
+                    Откройте вторую вкладку этой страницы и введите код. Ждём…{" "}
+                    <span className="anim-blink">▮</span>
                   </p>
                   <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
                     ОТМЕНА
@@ -501,7 +428,63 @@ function MenuScreen({
                 </div>
               )}
 
-              {netPanel.state === "joining" && (
+              {netPanel.state === "hosting" && netPanel.transport === "online" && (
+                <div>
+                  <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 1/2 — ОТПРАВЬТЕ ПРИГЛАШЕНИЕ</p>
+                  {!netPanel.invite ? (
+                    <p className="font-body text-[10px] text-dim mb-2">
+                      Создаём приглашение… <span className="anim-blink">▮</span>
+                    </p>
+                  ) : (
+                    <div className="mb-2">
+                      <textarea
+                        readOnly
+                        value={netPanel.invite}
+                        onFocus={(e) => e.currentTarget.select()}
+                        spellCheck={false}
+                        className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-[#3ddad7] outline-none focus:border-[#3ddad7] mb-1"
+                      />
+                      <button
+                        onClick={() => netPanel.onCopy(netPanel.invite, "invite")}
+                        className="px-btn no-select w-full py-1.5 bg-[#0e6b69] text-paper text-[9px]"
+                      >
+                        {netPanel.copied === "invite" ? "СКОПИРОВАНО!" : "⧉ СКОПИРОВАТЬ ПРИГЛАШЕНИЕ"}
+                      </button>
+                      <p className="font-body text-[9px] text-dim/70 mt-1 leading-tight">
+                        Перешлите этот код другу в любом мессенджере.
+                      </p>
+                    </div>
+                  )}
+                  <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 2/2 — ВСТАВЬТЕ ОТВЕТ ДРУГА</p>
+                  <textarea
+                    value={netPanel.answerInput}
+                    onChange={(e) => netPanel.setAnswerInput(e.target.value)}
+                    placeholder="Код ответа от друга…"
+                    spellCheck={false}
+                    className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-paper outline-none focus:border-gold placeholder:text-[#39406e]"
+                  />
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                  )}
+                  <div className="flex gap-1.5 mt-1.5">
+                    <button
+                      onClick={netPanel.onAcceptAnswer}
+                      disabled={!netPanel.answerInput.trim()}
+                      className="px-btn no-select flex-1 py-2 bg-gold text-[#070919] text-[10px] disabled:opacity-35"
+                    >
+                      СОЕДИНИТЬ
+                    </button>
+                    <button onClick={netPanel.onCancel} className="px-btn no-select px-3 py-2 bg-panel text-dim text-[9px]">
+                      ОТМЕНА
+                    </button>
+                  </div>
+                  <p className="font-body text-[9px] text-dim mt-1.5">
+                    После соединения бой начнётся автоматически. <span className="anim-blink">▮</span>
+                  </p>
+                </div>
+              )}
+
+              {netPanel.state === "joining" && netPanel.transport === "local" && (
                 <div className="text-center">
                   <p className="font-body text-[10px] text-dim mb-2">
                     Подключаемся к комнате <span className="text-[#3ddad7] font-pixel">{netPanel.join}</span>…{" "}
@@ -513,6 +496,65 @@ function MenuScreen({
                   <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
                     ОТМЕНА
                   </button>
+                </div>
+              )}
+
+              {netPanel.state === "joining" && netPanel.transport === "online" && (
+                <div>
+                  {!netPanel.answer ? (
+                    <>
+                      <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 1/2 — ВСТАВЬТЕ ПРИГЛАШЕНИЕ ХОСТА</p>
+                      <textarea
+                        value={netPanel.inviteInput}
+                        onChange={(e) => netPanel.setInviteInput(e.target.value)}
+                        placeholder="Код приглашения от хоста…"
+                        spellCheck={false}
+                        className="w-full h-16 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-paper outline-none focus:border-gold placeholder:text-[#39406e]"
+                      />
+                      {netPanel.error && (
+                        <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                      )}
+                      <div className="flex gap-1.5 mt-1.5">
+                        <button
+                          onClick={netPanel.onMakeAnswer}
+                          disabled={!netPanel.inviteInput.trim()}
+                          className="px-btn no-select flex-1 py-2 bg-gold text-[#070919] text-[10px] disabled:opacity-35"
+                        >
+                          СОЗДАТЬ ОТВЕТ
+                        </button>
+                        <button onClick={netPanel.onCancel} className="px-btn no-select px-3 py-2 bg-panel text-dim text-[9px]">
+                          ОТМЕНА
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 2/2 — ОТПРАВЬТЕ ОТВЕТ ХОСТУ</p>
+                      <textarea
+                        readOnly
+                        value={netPanel.answer}
+                        onFocus={(e) => e.currentTarget.select()}
+                        spellCheck={false}
+                        className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-[#3ddad7] outline-none focus:border-[#3ddad7] mb-1"
+                      />
+                      <button
+                        onClick={() => netPanel.onCopy(netPanel.answer, "answer")}
+                        className="px-btn no-select w-full py-1.5 bg-[#0e6b69] text-paper text-[9px]"
+                      >
+                        {netPanel.copied === "answer" ? "СКОПИРОВАНО!" : "⧉ СКОПИРОВАТЬ ОТВЕТ"}
+                      </button>
+                      {netPanel.error && (
+                        <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                      )}
+                      <p className="font-body text-[9px] text-dim mt-1.5">
+                        Хост вставляет ваш ответ у себя — и канал откроется. Ждём…{" "}
+                        <span className="anim-blink">▮</span>
+                      </p>
+                      <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px] mt-1">
+                        ОТМЕНА
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -644,13 +686,10 @@ export default function App() {
   const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
   const [netTransport, setNetTransport] = useState<Transport>("online");
   const [roomCode, setRoomCode] = useState("");
-  const [serverInput, setServerInput] = useState("");
-  const [serverLabel, setServerLabel] = useState(() => {
-    const c = net.getCustomServer();
-    return c ? `${c.host}:${c.port}` : "0.peerjs.com (облако)";
-  });
-  const [ipLan, setIpLan] = useState<string | null>(null);
-  const [ipPub, setIpPub] = useState<string | null>(null);
+  const [inviteCode, setInviteCode] = useState(""); // хост: приглашение для друга
+  const [answerCode, setAnswerCode] = useState(""); // гость: ответ для хоста
+  const [inviteInput, setInviteInput] = useState(""); // гость вставляет приглашение
+  const [answerInput, setAnswerInput] = useState(""); // хост вставляет ответ
   const [copied, setCopied] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [netPeerName, setNetPeerName] = useState("Соперник");
@@ -670,6 +709,10 @@ export default function App() {
     setNetState("off");
     setRoomCode("");
     setJoinCode("");
+    setInviteCode("");
+    setAnswerCode("");
+    setInviteInput("");
+    setAnswerInput("");
     setNetError("");
     setNetPeerName("Соперник");
     myRematchRef.current = false;
@@ -706,6 +749,14 @@ export default function App() {
       onCode: (code: string) => {
         setRoomCode(code);
         setNetState("hosting");
+        setNetError("");
+      },
+      onInvite: (code: string) => {
+        setInviteCode(code);
+        setNetError("");
+      },
+      onAnswer: (code: string) => {
+        setAnswerCode(code);
         setNetError("");
       },
       onConnected: (_name: string, isHost: boolean) => {
@@ -751,9 +802,8 @@ export default function App() {
         setNetError(msg);
         setNetState("off");
         setRoomCode("");
-      },
-      onRetry: (attempt: number, of: number) => {
-        setNetError(`Связь с сервером нестабильна — повторная попытка ${attempt}/${of}…`);
+        setInviteCode("");
+        setAnswerCode("");
       },
     };
     net.setHooks(hooks);
@@ -853,6 +903,7 @@ export default function App() {
     setNetState("hosting");
   }, [netTransport]);
 
+  /** Вход по коду — только для локального режима (две вкладки). */
   const joinRoom = useCallback(() => {
     const code = joinCode.trim().toUpperCase();
     if (code.length < 4) {
@@ -862,26 +913,40 @@ export default function App() {
     initAudio();
     sfx.select();
     setNetError("");
-    if (netTransport === "local") net.joinLocal(code);
-    else net.joinOnline(code);
+    net.joinLocal(code);
     setNetState("joining");
-  }, [joinCode, netTransport]);
+  }, [joinCode]);
 
-  /** Свой сигнальный сервер: «host:port», пусто — сброс на облако 0.peerjs.com. */
-  const applyServer = useCallback(() => {
-    const c = net.setCustomServer(serverInput);
-    setServerLabel(c ? `${c.host}:${c.port}` : "0.peerjs.com (облако)");
-    setServerInput("");
-    sfx.tick();
-  }, [serverInput]);
-
-  /** Быстрая кнопка: сигнальный сервер крутится на этом же компьютере. */
-  const serverLocalPc = useCallback(() => {
-    net.setCustomServer("localhost:9000");
-    setServerLabel("localhost:9000");
-    setServerInput("");
+  /** Гость (интернет): готовимся принять приглашение. */
+  const guestStart = useCallback(() => {
+    initAudio();
     sfx.select();
+    setNetError("");
+    setInviteCode("");
+    setAnswerCode("");
+    setInviteInput("");
+    setAnswerInput("");
+    net.joinOnline();
+    setNetState("joining");
   }, []);
+
+  /** Хост: вставляем ответ друга — после этого канал откроется. */
+  const acceptAnswer = useCallback(() => {
+    if (!answerInput.trim()) return;
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.acceptAnswer(answerInput);
+  }, [answerInput]);
+
+  /** Гость: из приглашения создаём ответ. */
+  const makeAnswer = useCallback(() => {
+    if (!inviteInput.trim()) return;
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.createAnswer(inviteInput);
+  }, [inviteInput]);
 
   const copyText = useCallback((text: string, key: string) => {
     const done = () => {
@@ -895,19 +960,6 @@ export default function App() {
       done();
     }
   }, []);
-
-  // пока комната открыта через свой сервер — определяем IP хоста для приглашения
-  useEffect(() => {
-    if (!(netState === "hosting" && netTransport === "online")) return;
-    let alive = true;
-    setIpLan(null);
-    setIpPub(null);
-    detectLanIp().then((ip) => alive && setIpLan(ip));
-    detectPublicIp().then((ip) => alive && setIpPub(ip));
-    return () => {
-      alive = false;
-    };
-  }, [netState, netTransport]);
 
   const cancelNet = useCallback(() => {
     net.send({ t: "quit" });
@@ -1308,13 +1360,15 @@ export default function App() {
             onCreate: createRoom,
             onJoin: joinRoom,
             onCancel: cancelNet,
-            serverLabel,
-            serverInput,
-            setServerInput,
-            onApplyServer: applyServer,
-            onLocalPc: serverLocalPc,
-            ipLan,
-            ipPub,
+            invite: inviteCode,
+            answer: answerCode,
+            inviteInput,
+            setInviteInput,
+            answerInput,
+            setAnswerInput,
+            onGuestStart: guestStart,
+            onAcceptAnswer: acceptAnswer,
+            onMakeAnswer: makeAnswer,
             copied,
             onCopy: copyText,
           }}
