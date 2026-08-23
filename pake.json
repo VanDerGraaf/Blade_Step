@@ -1,0 +1,12 @@
+{
+  "url": "./dist/index.html",
+  "name": "BladeStep",
+  "icon": "icon.png",
+  "width": 1280,
+  "height": 820,
+  "fullscreen": false,
+  "transparent": false,
+  "resizable": true,
+  "alwaysOnTop": false,
+  "hideTitleBar": false
+}

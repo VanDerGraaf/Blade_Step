@@ -4,4 +4,10 @@ dist/
 build/
 bin/
 release/
+icon.ico
+*-setup.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
 *.log

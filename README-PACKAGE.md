@@ -1,75 +1,64 @@
-# Blade Step — десктопная упаковка (Neutralino.js)
+# Blade Step → десктопный exe (Pake)
 
-Игра упаковывается в обычную программу: **один исполняемый файл + папка с игрой**.
-Другу не нужны Node, npm, браузер или установка — он распаковывает архив и кликает.
+Упаковка игры в одно лёгкое приложение на системном WebView (WebView2 на Windows,
+WebKit на macOS/Linux) — без Electron и без ~150 МБ Chromium.
 
-## Быстрый старт (на компьютере упаковщика)
+## Что получится
 
-Требуется только Node.js (тот же, что уже стоит для разработки).
-
-```bash
-node package.cjs            # все платформы
-node package.cjs win        # только Windows
-node package.cjs linux      # только Linux x64
-node package.cjs mac_arm64  # macOS Apple Silicon
-node package.cjs win linux  # несколько сразу
-```
-
-Скрипт сам:
-1. ставит зависимости (`npm install`), если в папке ещё нет `node_modules` —
-   свежую копию проекта можно упаковывать сразу, ничего не делая вручную;
-2. собирает игру **локальным** vite проекта с относительными путями (`--base=./`);
-3. скачивает бинарник Neutralino v5.6.0 (~4 МБ) в папку `bin/`;
-4. складывает готовую папку в `release/BladeStep-<платформа>/`.
-
-> Важно: не запускайте `npx vite build` вручную в свежей папке без `node_modules` —
-> npx скачает чужой vite, который не найдёт плагины проекта. `node package.cjs` делает всё правильно.
-
-Результат — папка вида:
+В корне проекта появится один файл-установщик, например:
 
 ```
-release/BladeStep-win/
-  BladeStep.exe             ← двойной клик = игра
-  neutralino.config.json
-  dist/                     ← сборка игры
+BladeStep_2.x.x_x64-setup.exe      ← отправляете другу, он ставит одним кликом
 ```
 
-Заархивируйте её в zip и отправьте. Всё.
+Установленное приложение — папка с `BladeStep.exe` и ресурсами (~10–15 МБ на диске).
+Если нужна полностью portable-версия без установки — распакуйте установщик 7-Zip.
 
-## Если скачивание не сработало
+## Одноразовые требования на машине упаковщика
 
-Скачайте вручную и положите в `bin/`:
+1. **Rust** — https://rustup.rs (стандартная установка).
+2. **Pake CLI** — `npm i -g pake-cli` (ставит готовый бинарник через npm, качать
+   с GitHub ничего не нужно).
+3. **Только Windows:** MSVC C++ Build Tools — в Visual Studio Installer включите
+   компонент «Разработка классических приложений на C++» (нужен `link.exe`).
+   WebView2 уже предустановлен в Windows 10/11.
 
-- Windows: https://github.com/neutralinojs/neutralinojs/releases/download/v5.6.0/neutralino-win_x64.exe
-- Linux x64: https://github.com/neutralinojs/neutralinojs/releases/download/v5.6.0/neutralino-linux_x64
-- Linux ARM: https://github.com/neutralinojs/neutralinojs/releases/download/v5.6.0/neutralino-linux_arm64
-- macOS Intel: https://github.com/neutralinojs/neutralinojs/releases/download/v5.6.0/neutralino-macos_x64
-- macOS Apple Silicon: https://github.com/neutralinojs/neutralinojs/releases/download/v5.6.0/neutralino-macos_arm64
+## Упаковка
 
-Затем повторите `node package.cjs <платформа>` — скрипт найдёт файл в `bin/` и пропустит скачивание.
+```
+node package-pake.cjs
+```
 
-## Запуск прямо из проекта (без release/)
+Скрипт всё делает сам:
 
-1. Скопируйте бинарник из `bin/` в корень проекта (рядом с `neutralino.config.json`),
-   переименовав по имени платформы: `neutralino-win_x64.exe` / `neutralino-linux_x64` / …
-2. Если нет `node_modules` — один раз выполните `npm install`.
-3. Соберите игру: `npx vite build --base=./` (уже с установленными зависимостями).
-4. Запустите бинарник из корня — он подхватит конфиг и откроет `dist/`.
+1. ставит npm-зависимости, если их нет;
+2. собирает игру локальным vite (`vite build --base=./` — относительные пути, важно!);
+3. рисует пиксельную иконку (`tools/make-icon.cjs`) и конвертирует её в `icon.ico`
+   для Windows (`tools/png2ico.cjs`);
+4. запускает `pake` (конфиг — `pake.json`: окно 1280×820, игра из `dist/index.html`).
 
-## Первый запуск у получателя
+Первый запуск долгий: cargo скачивает крейты и компилирует приложение. Дальше — быстрее.
 
-- **Windows:** SmartScreen может спросить «Неизвестное приложение» → *Подробнее → Выполнить в любом случае* (файл не подписан).
-- **macOS:** первый раз через правый клик → «Открыть» (Gatekeeper).
-- **Linux:** если нет прав — `chmod +x BladeStep`.
+## Своя иконка
 
-## Мультиплеер в десктопной версии
+`icon.png` генерируется автоматически. Хотите другую — положите свой PNG 512×512
+в корень под именем `icon.png` (скрипт существующий не перезаписывает).
 
-Работает ровно как в браузере: обмен двумя кодами через WebRTC, без серверов.
-Режим «Две вкладки» тоже работает (BroadcastChannel доступен в веб-вью).
+## macOS / Linux
 
-## Как это устроено
+Та же команда. На выходе — `.dmg` (macOS) или `.AppImage`/`.deb` (Linux);
+иконка берётся как `icon.png` (на Windows — `icon.ico`).
 
-Neutralino — исполняемый файл ~4 МБ с системным веб-вью (WebView2 / WebKitGTK / WKWebView).
-Он читает `neutralino.config.json`, открывает нативное окно «Blade Step» (1280×820,
-минимум 960×640, по центру экрана) и грузит в него `dist/index.html`.
-Никаких фоновых процессов, установки в систему или автозапуска — чистый portable.
+## Сеть в десктопной версии
+
+Мультиплеер работает так же, как в браузере: обмен двумя кодами (приглашение →
+ответ) поверх прямого WebRTC-канала; режим «ДВЕ ВКЛАДКИ» — тоже. Серверы не нужны.
+
+## Если что-то пошло не так
+
+| Ошибка | Лечение |
+|---|---|
+| `pake: command not found` | `npm i -g pake-cli` (+ Rust) |
+| ошибка про `link.exe` / `MSVC` | поставить C++ Build Tools в Visual Studio Installer |
+| cargo не качает крейты | сеть/прокси до crates.io; повторить позже |
+| игра в окне белая | пересобрать: `node package-pake.cjs` (важен флаг `--base=./`) |
