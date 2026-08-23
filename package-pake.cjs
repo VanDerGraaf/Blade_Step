@@ -106,9 +106,17 @@ if (!ok) {
 }
 
 // ---------- 5. результат ----------
-const artifacts = fs
-  .readdirSync(root)
-  .filter((f) => /-setup\.exe$|\.msi$|\.dmg$|\.AppImage$|\.deb$/.test(f));
-if (!artifacts.length) fail("pake отработал, но файл-установщик не найден в корне проекта.");
+// pake кладёт артефакты в output/, но проверим и корень — на всякий случай
+const outDir = path.join(root, "output");
+const isArtifact = (f) => /-setup\.exe$|\.msi$|\.dmg$|\.AppImage$|\.deb$|\.tar\.gz$/.test(f);
+const artifacts = [
+  ...(fs.existsSync(outDir) ? fs.readdirSync(outDir).filter(isArtifact).map((f) => path.join("output", f)) : []),
+  ...fs.readdirSync(root).filter(isArtifact),
+];
+if (!artifacts.length)
+  fail(
+    "pake отработал, но файл-установщик не найден ни в output/, ни в корне.\n" +
+      "  Посмотрите вручную: папка «output» рядом с pake.json."
+  );
 log("Готово! Раздавайте файл(ы):");
 for (const a of artifacts) log("  → " + a);
