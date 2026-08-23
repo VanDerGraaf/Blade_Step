@@ -10,7 +10,7 @@ import {
   Personality,
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
-import { net, NetMsg } from "./game/net";
+import { net, NetMsg, Transport } from "./game/net";
 import {
   ActionIcon,
   IconHeart,
@@ -200,6 +200,8 @@ interface NetPanelProps {
   join: string;
   setJoin: (v: string) => void;
   error: string;
+  transport: Transport;
+  setTransport: (t: Transport) => void;
   onCreate: () => void;
   onJoin: () => void;
   onCancel: () => void;
@@ -308,6 +310,28 @@ function MenuScreen({
                 СЕТЕВАЯ ДУЭЛЬ (P2P)
               </p>
 
+              {/* выбор транспорта */}
+              <div className="flex gap-1 mb-2">
+                <button
+                  onClick={() => netPanel.setTransport("online")}
+                  disabled={netPanel.state !== "off"}
+                  className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
+                    netPanel.transport === "online" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
+                  }`}
+                >
+                  ИНТЕРНЕТ
+                </button>
+                <button
+                  onClick={() => netPanel.setTransport("local")}
+                  disabled={netPanel.state !== "off"}
+                  className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
+                    netPanel.transport === "local" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
+                  }`}
+                >
+                  ДВЕ ВКЛАДКИ
+                </button>
+              </div>
+
               {netPanel.state === "off" && (
                 <div className="flex flex-col gap-1.5">
                   <button
@@ -334,7 +358,9 @@ function MenuScreen({
                     <p className="font-body text-[10px] text-blood leading-tight">{netPanel.error}</p>
                   )}
                   <p className="font-body text-[9px] text-dim/70 leading-tight">
-                    Друг создаёт комнату и диктует код — вы входите по нему. Нужен интернет.
+                    {netPanel.transport === "online"
+                      ? "Друг создаёт комнату и диктует код — вы входите по нему. Нужен интернет и доступ к 0.peerjs.com."
+                      : "Один игрок создаёт комнату, второй открывает вкладку этого же браузера и входит по коду. Работает без интернета."}
                   </p>
                 </div>
               )}
@@ -346,7 +372,10 @@ function MenuScreen({
                     {netPanel.code}
                   </p>
                   <p className="font-body text-[10px] text-dim mb-2">
-                    Ждём второго бойца… <span className="anim-blink">▮</span>
+                    {netPanel.transport === "local"
+                      ? "Откройте вторую вкладку этой страницы и введите код. "
+                      : "Передайте код второму игроку. "}
+                    Ждём… <span className="anim-blink">▮</span>
                   </p>
                   <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
                     ОТМЕНА
@@ -495,6 +524,7 @@ export default function App() {
 
   // ---- сетевая дуэль ----
   const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
+  const [netTransport, setNetTransport] = useState<Transport>("online");
   const [roomCode, setRoomCode] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [netPeerName, setNetPeerName] = useState("Соперник");
@@ -596,6 +626,9 @@ export default function App() {
         setNetState("off");
         setRoomCode("");
       },
+      onRetry: (attempt: number, of: number) => {
+        setNetError(`Связь с сервером нестабильна — повторная попытка ${attempt}/${of}…`);
+      },
     };
     net.setHooks(hooks);
   }, [engine, beginNetMatch, resetNetUi]);
@@ -689,9 +722,10 @@ export default function App() {
     sfx.select();
     setNetError("");
     setJoinCode("");
-    net.host();
+    if (netTransport === "local") net.hostLocal();
+    else net.hostOnline();
     setNetState("hosting");
-  }, []);
+  }, [netTransport]);
 
   const joinRoom = useCallback(() => {
     const code = joinCode.trim().toUpperCase();
@@ -702,9 +736,10 @@ export default function App() {
     initAudio();
     sfx.select();
     setNetError("");
-    net.join(code);
+    if (netTransport === "local") net.joinLocal(code);
+    else net.joinOnline(code);
     setNetState("joining");
-  }, [joinCode]);
+  }, [joinCode, netTransport]);
 
   const cancelNet = useCallback(() => {
     net.send({ t: "quit" });
@@ -1100,6 +1135,8 @@ export default function App() {
             join: joinCode,
             setJoin: setJoinCode,
             error: netError,
+            transport: netTransport,
+            setTransport: setNetTransport,
             onCreate: createRoom,
             onJoin: joinRoom,
             onCancel: cancelNet,
