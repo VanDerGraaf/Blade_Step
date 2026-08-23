@@ -9,11 +9,12 @@ import {
   PERSONALITIES,
   Personality,
 } from "./game/types";
-import { initAudio, isMuted, setMuted, sfx } from "./game/audio";
+import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
 import {
   ActionIcon,
   IconHeart,
   IconHome,
+  IconMusic,
   IconMute,
   IconPause,
   IconRetry,
@@ -310,7 +311,7 @@ function MenuScreen({
           )}
 
           <p className="font-body text-[9px] text-dim/70 text-center mt-2">
-            [1–6] взять кубик · [Enter] бой · [Esc] пауза
+            [1–6] взять кубик · [Enter] бой · [Esc] пауза · [M] звук · [N] музыка
           </p>
         </div>
       </div>
@@ -396,6 +397,7 @@ export default function App() {
   const [slots, setSlots] = useState<(number | null)[]>([null, null, null]);
   const [pers, setPers] = useState<MenuChoice>("aggressor");
   const [muted, setMutedState] = useState(isMuted());
+  const [music, setMusicState] = useState(isMusicOn());
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
@@ -482,6 +484,14 @@ export default function App() {
     if (!m) sfx.tick();
   }, []);
 
+  const toggleMusic = useCallback(() => {
+    initAudio();
+    const on = !isMusicOn();
+    setMusicOn(on);
+    setMusicState(on);
+    if (on) sfx.tick();
+  }, []);
+
   // keyboard
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
@@ -501,11 +511,13 @@ export default function App() {
         if (ui.screen === "play") togglePause();
       } else if (ev.key.toLowerCase() === "m") {
         toggleMute();
+      } else if (ev.key.toLowerCase() === "n") {
+        toggleMusic();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectHandDie, clearSlots, fight, startMatch, togglePause, toggleMute, ui.phase, ui.screen]);
+  }, [selectHandDie, clearSlots, fight, startMatch, togglePause, toggleMute, toggleMusic, ui.phase, ui.screen]);
 
   const enemyMeta = PERSONALITIES[ui.personality];
   const inGame = ui.screen !== "menu";
@@ -541,6 +553,14 @@ export default function App() {
           <span className="hidden sm:flex items-center gap-1 ml-1">
             <button onClick={toggleMute} className="px-btn w-8 h-8 bg-panel text-paper flex items-center justify-center" aria-label="звук">
               {muted ? <IconMute className="w-4 h-4" /> : <IconSound className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={toggleMusic}
+              className="px-btn w-8 h-8 bg-panel flex items-center justify-center"
+              aria-label="музыка"
+              title="Музыка [N]"
+            >
+              <IconMusic className={`w-4 h-4 ${music ? "text-gold" : "text-[#39406e]"}`} />
             </button>
             {inGame && (
               <>

@@ -253,6 +253,26 @@ export const IconHeart = ({ className }: { className?: string }) => <Px rows={HE
 export const IconSkull = ({ className }: { className?: string }) => <Px rows={SKULL_ROWS} className={className} />;
 export const IconSound = ({ className }: { className?: string }) => <Px rows={SOUND_ROWS} className={className} />;
 export const IconMute = ({ className }: { className?: string }) => <Px rows={MUTE_ROWS} className={className} />;
+
+const MUSIC_ROWS = [
+  "................",
+  "................",
+  "......#######...",
+  "......#######...",
+  "......#.....#...",
+  "......#.....#...",
+  "......#.....#...",
+  "......#.....#...",
+  "......#.....#...",
+  "......#.....#...",
+  "......#.....#...",
+  "...####...####..",
+  "..#####..#####..",
+  "..#####..#####..",
+  "...###....###...",
+  "................",
+];
+export const IconMusic = ({ className }: { className?: string }) => <Px rows={MUSIC_ROWS} className={className} />;
 export const IconPause = ({ className }: { className?: string }) => <Px rows={PAUSE_ROWS} className={className} />;
 export const IconHome = ({ className }: { className?: string }) => <Px rows={HOME_ROWS} className={className} />;
 export const IconRetry = ({ className }: { className?: string }) => <Px rows={RETRY_ROWS} className={className} />;

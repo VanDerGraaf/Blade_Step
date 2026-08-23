@@ -15,6 +15,7 @@ export function initAudio() {
     master = ctx.createGain();
     master.gain.value = 0.5;
     master.connect(ctx.destination);
+    startMusic();
   } catch {
     ctx = null;
   }
@@ -160,3 +161,128 @@ export const sfx = {
   },
   tick: () => tone({ f0: 880, dur: 0.04, vol: 0.07 }),
 };
+
+// =====================================================================
+// MUSIC — classic 8-bit loop, 32-note lead in D Dorian (D E F G A B C)
+// NES-style voices: pulse lead + triangle bass + noise hats.
+// =====================================================================
+
+const MELODY = [
+  69, 72, 74, 72, 69, 67, 69, -1, // A  C  D  C  A  G  A  .
+  74, 72, 69, 67, 64, 67, 69, -1, // D  C  A  G  E  G  A  .
+  71, 74, 72, 71, 69, 71, 72, -1, // B  D  C  B  A  B  C  .  (B = дорийская секста)
+  74, 72, 69, 67, 69, -1, 74, -1, // D  C  A  G  A  .  D  .  (разрешение в тонику)
+];
+const BASS = [
+  38, 38, 38, 38, // D2  — Dm
+  43, 43, 43, 43, // G2  — G
+  38, 38, 38, 38, // D2  — Dm
+  36, 36, 45, 43, // C2 C2 A2 G2 — каданс
+];
+const BPM = 132;
+const EIGHTH = 60 / BPM / 2;
+
+let musicGain: GainNode | null = null;
+let musicTimer: number | null = null;
+let mStep = 0;
+let mNext = 0;
+let musicOn = (typeof localStorage !== "undefined" && localStorage.getItem("bladestep_music")) !== "0";
+
+const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
+
+function leadNote(midi: number, t0: number) {
+  if (midi < 0 || !ctx || !musicGain) return;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "square";
+  osc.frequency.value = mtof(midi);
+  const d = EIGHTH * 0.85;
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(0.075, t0 + 0.012);
+  g.gain.setValueAtTime(0.075, t0 + d * 0.55);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + d);
+  osc.connect(g).connect(musicGain);
+  osc.start(t0);
+  osc.stop(t0 + d + 0.05);
+}
+
+function bassNote(midi: number, t0: number) {
+  if (!ctx || !musicGain) return;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "triangle";
+  osc.frequency.value = mtof(midi);
+  const d = EIGHTH * 1.85;
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(0.15, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + d);
+  osc.connect(g).connect(musicGain);
+  osc.start(t0);
+  osc.stop(t0 + d + 0.05);
+}
+
+function hat(t0: number, vol: number) {
+  if (!ctx || !musicGain) return;
+  const len = 0.035;
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * len), ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 6500;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + len);
+  src.connect(hp).connect(g).connect(musicGain);
+  src.start(t0);
+}
+
+function scheduleStep(s: number, t0: number) {
+  leadNote(MELODY[s % MELODY.length], t0);
+  if (s % 2 === 0) bassNote(BASS[Math.floor(s / 2) % BASS.length], t0);
+  if (s % 2 === 1) hat(t0, 0.025); // off-beat hats
+  else if (s % 8 === 4) hat(t0, 0.05); // snare-ish accent on beat 3
+}
+
+function musicTick() {
+  if (!ctx || !musicGain) return;
+  while (mNext < ctx.currentTime + 0.15) {
+    scheduleStep(mStep, mNext);
+    mNext += EIGHTH;
+    mStep++;
+  }
+}
+
+export function startMusic() {
+  if (!musicOn || !ctx || !master) return;
+  if (musicTimer !== null) return;
+  if (!musicGain) {
+    musicGain = ctx.createGain();
+    musicGain.gain.value = 1;
+    musicGain.connect(master);
+  }
+  mStep = 0;
+  mNext = ctx.currentTime + 0.12;
+  musicTimer = window.setInterval(musicTick, 40);
+}
+
+export function stopMusic() {
+  if (musicTimer !== null) {
+    clearInterval(musicTimer);
+    musicTimer = null;
+  }
+}
+
+export function setMusicOn(on: boolean) {
+  musicOn = on;
+  try {
+    localStorage.setItem("bladestep_music", on ? "1" : "0");
+  } catch { /* noop */ }
+  if (on) startMusic();
+  else stopMusic();
+}
+export function isMusicOn() {
+  return musicOn;
+}
