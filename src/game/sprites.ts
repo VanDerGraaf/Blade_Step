@@ -410,13 +410,13 @@ function drawHead(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn, lea
 function drawTails(ctx: CanvasRenderingContext2D, px: Px, look: Look, C: CFn, o: DrawOpts) {
   void ctx;
   void C;
-  const sway = Math.sin(o.time * 4) * 1;
-  // two ghostly tails behind
-  px(1 - sway, 13, 3, 2, look.mainSh);
-  px(0 - sway, 15, 3, 2, look.mainSh);
-  px(-1 - sway, 17, 2, 2, look.mainSh);
-  px(2 - sway, 12, 2, 2, look.main);
-  px(1 - sway, 18, 2, 1, look.gear);
+  const sway = Math.round(Math.sin(o.time * 4));
+  // ghostly tail rooted under the torso (drawn before it, so the root hides under the robe)
+  px(3 - sway, 14, 3, 2, look.main); // root at waist
+  px(2 - sway, 15, 3, 2, look.mainSh);
+  px(1 - sway, 17, 3, 2, look.mainSh);
+  px(0 - sway, 19, 2, 1, look.gear); // white tip
+  px(4 - sway, 13, 2, 1, look.mainSh); // second wisp, tucked in
 }
 
 // ---------------------------------------------------------------- arm + weapon

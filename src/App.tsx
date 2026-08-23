@@ -201,32 +201,29 @@ function MenuScreen({
   setPers: (p: MenuChoice) => void;
   onStart: () => void;
 }) {
+  const [rulesOpen, setRulesOpen] = useState(false);
   return (
     <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
-      <div className="min-h-full flex items-center justify-center p-4 md:p-8">
-        <div className="w-full max-w-5xl grid lg:grid-cols-[1.12fr_1fr] gap-6 items-start anim-rise">
-          {/* left: identity + codex */}
-          <div>
-            <h1 className="font-pixel leading-none select-none">
-              <span className="block text-[36px] md:text-[56px] text-gold drop-shadow-[5px_5px_0_#070919]">BLADE</span>
-              <span className="block text-[36px] md:text-[56px] text-blood drop-shadow-[5px_5px_0_#070919] md:ml-12 -mt-1">STEP</span>
+      <div className="min-h-full flex items-center justify-center p-3 md:p-6">
+        <div className="w-full max-w-sm md:max-w-md anim-rise">
+          {/* title strip */}
+          <div className="flex items-end justify-between gap-2 mb-2 select-none">
+            <h1 className="font-pixel leading-none whitespace-nowrap">
+              <span className="text-[24px] md:text-[30px] text-gold drop-shadow-[3px_3px_0_#070919]">BLADE</span>{" "}
+              <span className="text-[24px] md:text-[30px] text-blood drop-shadow-[3px_3px_0_#070919]">STEP</span>
             </h1>
-            <p className="font-pixel text-[8px] md:text-[10px] text-blade mt-3 mb-1">ОДНОВРЕМЕННАЯ ДУЭЛЬ КЛИНКОВ</p>
-            <p className="font-body text-[12px] md:text-[13px] text-dim mb-4 max-w-md leading-snug">
-              Шесть клеток помоста над пропастью. Оба бойца бросают по <span className="text-paper">6 кубиков</span> — руки открыты,
-              но каждый тайно выбирает <span className="text-paper">3</span>. Кубики вскрываются по одному, и бойцы действуют{" "}
-              <span className="text-paper">одновременно</span>.
-            </p>
-            <Codex />
+            <span className="font-pixel text-[6px] md:text-[7px] text-blade pb-1 text-right leading-relaxed">
+              одновременная дуэль<br />6 клеток · 3 HP
+            </span>
           </div>
 
-          {/* right: fight select */}
-          <div className="px-panel p-3 md:p-4 bg-panel">
-            <p className="font-pixel text-[10px] text-paper mb-3 flex items-center gap-2">
-              <span className="w-2 h-2 bg-blood inline-block anim-blink" />
+          {/* fight select */}
+          <div className="px-panel p-2.5 md:p-3 bg-panel">
+            <p className="font-pixel text-[9px] text-paper mb-2 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-blood inline-block anim-blink" />
               ВЫБЕРИ СОПЕРНИКА
             </p>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               {(Object.keys(PERSONALITIES) as Personality[]).map((p) => {
                 const m = PERSONALITIES[p];
                 const sel = pers === p;
@@ -238,18 +235,18 @@ function MenuScreen({
                       sfx.select();
                       setPers(p);
                     }}
-                    className={`no-select text-left border-[3px] border-[#070919] px-3 py-2 transition-all duration-100 ${
+                    className={`no-select text-left border-[3px] border-[#070919] px-2.5 py-1.5 transition-all duration-100 ${
                       sel ? "translate-x-1 bg-ink" : "bg-ink2 hover:bg-ink hover:translate-x-0.5"
                     }`}
-                    style={sel ? { boxShadow: `inset 0 0 0 2px ${m.color}, 0 0 18px ${m.color}44` } : undefined}
+                    style={sel ? { boxShadow: `inset 0 0 0 2px ${m.color}, 0 0 14px ${m.color}44` } : undefined}
                   >
                     <span className="flex items-center justify-between gap-2">
-                      <span className="font-pixel text-[11px] md:text-[12px]" style={{ color: m.color }}>
+                      <span className="font-pixel text-[10px] md:text-[11px]" style={{ color: m.color }}>
                         {m.name}
                       </span>
                       <ThreatSkulls n={m.threat} color={m.color} />
                     </span>
-                    <span className="block font-body text-[11px] text-dim mt-0.5">
+                    <span className="block font-body text-[10px] text-dim mt-0.5 leading-tight">
                       {m.title} · <span className="italic opacity-80">{m.quote}</span>
                     </span>
                   </button>
@@ -263,34 +260,58 @@ function MenuScreen({
                   sfx.select();
                   setPers("any");
                 }}
-                className={`no-select text-left border-[3px] border-[#070919] px-3 py-2 transition-all duration-100 ${
+                className={`no-select text-left border-[3px] border-[#070919] px-2.5 py-1.5 transition-all duration-100 ${
                   pers === "any" ? "translate-x-1 bg-ink" : "bg-ink2 hover:bg-ink hover:translate-x-0.5"
                 }`}
                 style={
                   pers === "any"
-                    ? { boxShadow: "inset 0 0 0 2px #3ddad7, 0 0 18px rgba(61,218,215,0.3)" }
+                    ? { boxShadow: "inset 0 0 0 2px #3ddad7, 0 0 14px rgba(61,218,215,0.3)" }
                     : undefined
                 }
               >
                 <span className="flex items-center justify-between gap-2">
-                  <span className="font-pixel text-[11px] md:text-[12px] text-[#3ddad7]">СЛУЧАЙ</span>
-                  <span className="font-pixel text-[13px] text-[#3ddad7] anim-blink">?</span>
+                  <span className="font-pixel text-[10px] md:text-[11px] text-[#3ddad7]">СЛУЧАЙ</span>
+                  <span className="font-pixel text-[12px] text-[#3ddad7] anim-blink">?</span>
                 </span>
-                <span className="block font-body text-[11px] text-dim mt-0.5">
+                <span className="block font-body text-[10px] text-dim mt-0.5 leading-tight">
                   Испытание судьбы · <span className="italic opacity-80">«Кого пришлёт помост — того и встретишь»</span>
                 </span>
               </button>
             </div>
             <button
               onClick={onStart}
-              className="px-btn no-select w-full mt-4 py-3 md:py-4 bg-blood text-paper text-[13px] md:text-[15px] tracking-wider"
+              className="px-btn no-select w-full mt-2.5 py-2.5 md:py-3 bg-blood text-paper text-[12px] md:text-[13px] tracking-widest"
             >
               К БОЮ
             </button>
-            <p className="font-body text-[10px] text-dim text-center mt-2">
-              [1–6] взять кубик из руки · [Enter] бой · [Esc] пауза
-            </p>
           </div>
+
+          {/* rules: collapsed by default */}
+          <button
+            onClick={() => {
+              initAudio();
+              sfx.tick();
+              setRulesOpen((o) => !o);
+            }}
+            className="px-btn no-select w-full mt-1.5 px-3 py-2 bg-panel text-paper text-[9px] flex items-center justify-between"
+          >
+            <span>ПРАВИЛА И КУБИКИ</span>
+            <span className={`inline-block text-gold transition-transform duration-150 ${rulesOpen ? "rotate-180" : ""}`}>▼</span>
+          </button>
+          {rulesOpen && (
+            <div className="px-panel mt-1 p-2.5 bg-panel anim-rise">
+              <p className="font-body text-[11px] text-dim leading-snug mb-2">
+                Оба бойца бросают по <span className="text-paper">6 кубиков</span> — руки открыты, но каждый тайно выбирает{" "}
+                <span className="text-paper">3</span>. Кубики вскрываются по одному, бойцы действуют{" "}
+                <span className="text-paper">одновременно</span>. За краем помоста — пропасть.
+              </p>
+              <Codex />
+            </div>
+          )}
+
+          <p className="font-body text-[9px] text-dim/70 text-center mt-2">
+            [1–6] взять кубик · [Enter] бой · [Esc] пауза
+          </p>
         </div>
       </div>
     </div>
