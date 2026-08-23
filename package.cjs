@@ -9,9 +9,10 @@
  *   node package.cjs mac_arm64  — только macOS (Apple Silicon)
  *   node package.cjs win linux  — несколько сразу
  *
- * Скрипт: 1) собирает игру (vite build --base=./),
- *         2) скачивает бинарник Neutralino в bin/ (если его ещё нет),
- *         3) складывает готовую папку в release/BladeStep-<платформа>/.
+ * Скрипт: 1) сам ставит зависимости, если их нет (npm install),
+ *         2) собирает игру (vite build --base=./),
+ *         3) скачивает бинарник Neutralino в bin/ (если его ещё нет),
+ *         4) складывает готовую папку в release/BladeStep-<платформа>/.
  * Результат можно заархивировать и отправить другу — он просто кликнет.
  */
 const { execSync } = require("child_process");
@@ -44,6 +45,26 @@ function fail(s) {
   process.exit(1);
 }
 
+/** Сборка игры локальным vite проекта (не через npx — он мог бы скачать чужую версию vite). */
+function buildGame() {
+  if (!fs.existsSync(path.join(root, "node_modules", "vite"))) {
+    warn("Зависимости не установлены (нет node_modules) — выполняю npm install…");
+    try {
+      execSync("npm install", { cwd: root, stdio: "inherit" });
+    } catch {
+      fail("npm install не удался. Проверьте подключение к сети и доступ к registry.npmjs.org.");
+    }
+  }
+  const npmBin = path.join(root, "node_modules", ".bin");
+  const viteBin = process.platform === "win32" ? "vite.cmd" : "vite";
+  const viteCmd = fs.existsSync(path.join(npmBin, viteBin)) ? `"${path.join(npmBin, viteBin)}"` : "npx vite";
+  try {
+    execSync(`${viteCmd} build --base=./`, { cwd: root, stdio: "inherit" });
+  } catch {
+    fail("Не удалось собрать игру. Запустите вручную: npm install, затем node package.cjs.");
+  }
+}
+
 // ---------- 0. платформы ----------
 const args = process.argv.slice(2).filter(Boolean);
 const targets = (args.length ? args : Object.keys(PLATFORMS)).map((a) => a.toLowerCase());
@@ -53,11 +74,7 @@ for (const t of targets) {
 
 // ---------- 1. сборка игры ----------
 log("Собираю игру: vite build --base=./");
-try {
-  execSync("npx vite build --base=./", { cwd: root, stdio: "inherit" });
-} catch {
-  fail("Не удалось собрать игру. Убедитесь, что зависимости установлены (npm install выполнен один раз).");
-}
+buildGame();
 if (!fs.existsSync(path.join(distDir, "index.html"))) fail("dist/index.html не найден после сборки.");
 
 // ---------- 2. бинарники Neutralino ----------
