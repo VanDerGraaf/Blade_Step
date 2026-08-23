@@ -16,12 +16,12 @@ export const ACTIONS: Action[] = ["fwd", "back", "jump", "dodge", "strike", "blo
 export const SPECIAL_ACTIONS: Action[] = ["roll", "cleave", "bash", "reflect"];
 
 /** Наборы кубиков: из этих граней каждый боец бросает свою руку (6 кубиков). */
-export const DICE_POOLS: Record<Personality | "ronin", Action[]> = {
-  random: ["fwd", "back", "dodge", "strike"],
-  aggressor: ["fwd", "back", "jump", "block", "strike", "cleave"],
-  controller: ["fwd", "back", "dodge", "strike", "block", "bash"],
-  mirror: ["fwd", "back", "jump", "dodge", "strike", "reflect"],
-  shadow: ["fwd", "back", "roll", "dodge", "strike", "block"],
+export const DICE_POOLS: Record<EnemyKind | "ronin", Action[]> = {
+  scarecrow: ["fwd", "back", "dodge", "strike"], // учебный манекен: без прыжка и блока
+  oni: ["fwd", "back", "jump", "block", "strike", "cleave"], // рассечение вместо уклонения
+  guard: ["fwd", "back", "dodge", "strike", "block", "bash"], // удар щитом вместо прыжка
+  kitsune: ["fwd", "back", "jump", "dodge", "strike", "reflect"], // отражение вместо блока
+  shinobi: ["fwd", "back", "roll", "dodge", "strike", "block"], // перекат вместо прыжка
   ronin: ACTIONS,
 };
 

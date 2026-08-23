@@ -357,7 +357,7 @@ export class Engine {
       this.netSend({ t: "hand", hand: [...this.playerHand] });
       this.enemyHand = [...this.netEnemyHand];
     } else {
-      this.enemyHand = rollHand(DICE_POOLS[this.ui.personality]);
+      this.enemyHand = rollHand(DICE_POOLS[PERSONALITY_KIND[this.ui.personality]]);
     }
     this.patch({
       phase: "plan",

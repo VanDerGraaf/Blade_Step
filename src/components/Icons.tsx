@@ -391,6 +391,14 @@ export function ActionIcon({ action, className }: { action: Action; className?: 
       return <IconStrike className={className} />;
     case "block":
       return <IconBlock className={className} />;
+    case "roll":
+      return <IconRoll className={className} />;
+    case "cleave":
+      return <IconCleave className={className} />;
+    case "bash":
+      return <IconBash className={className} />;
+    case "reflect":
+      return <IconReflect className={className} />;
     case "wait":
       return <IconWait className={className} />;
   }

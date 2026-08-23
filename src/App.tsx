@@ -4,10 +4,13 @@ import {
   Action,
   ACTIONS,
   ACTION_META,
+  DICE_POOLS,
   GameResult,
   MatchStats,
   PERSONALITIES,
+  PERSONALITY_KIND,
   Personality,
+  SPECIAL_ACTIONS,
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
 import { net, NetMsg, Transport } from "./game/net";
@@ -155,30 +158,46 @@ const PHASE_LABEL: Record<UiSnapshot["phase"], string> = {
 
 // ---------------------------------------------------------------- screens
 
+function CodexEntry({ a, enemy }: { a: Action; enemy?: boolean }) {
+  const m = ACTION_META[a];
+  return (
+    <div
+      className={`flex items-start gap-2 px-panel px-2 py-1.5 bg-ink2/80 ${enemy ? "border-l-4 border-blood" : ""}`}
+    >
+      <span
+        className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center border-2 border-[#070919]"
+        style={{ background: m.dark, color: m.color }}
+      >
+        <ActionIcon action={a} className="w-4 h-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block font-pixel leading-tight" style={{ color: m.color, fontSize: 8 }}>
+          {m.name.toUpperCase()}
+          {enemy && <span className="text-blood ml-1.5" style={{ fontSize: 6 }}>ВРАГ</span>}
+        </span>
+        <span className="block font-body text-[11px] leading-tight text-dim">{m.desc}</span>
+      </span>
+    </div>
+  );
+}
+
 function Codex() {
   return (
     <div>
       <p className="font-pixel text-[9px] md:text-[10px] text-steel mb-2 tracking-wider">КОДЕКС КЛИНКА</p>
       <div className="grid sm:grid-cols-2 gap-1.5">
-        {ACTIONS.map((a) => {
-          const m = ACTION_META[a];
-          return (
-            <div key={a} className="flex items-start gap-2 px-panel px-2 py-1.5 bg-ink2/80">
-              <span className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center border-2 border-[#070919]" style={{ background: m.dark, color: m.color }}>
-                <ActionIcon action={a} className="w-4 h-4" />
-              </span>
-              <span>
-                <span className="block font-pixel leading-tight" style={{ color: m.color, fontSize: 8 }}>
-                  {m.name.toUpperCase()}
-                </span>
-                <span className="block font-body text-[11px] leading-tight text-dim">{m.desc}</span>
-              </span>
-            </div>
-          );
-        })}
+        {ACTIONS.map((a) => (
+          <CodexEntry key={a} a={a} />
+        ))}
+      </div>
+      <p className="font-pixel text-[8px] md:text-[9px] text-blood mt-2.5 mb-1.5 tracking-wider">ОСОБЫЕ ГРАНИ ВРАГОВ</p>
+      <div className="grid sm:grid-cols-2 gap-1.5">
+        {SPECIAL_ACTIONS.map((a) => (
+          <CodexEntry key={a} a={a} enemy />
+        ))}
       </div>
       <p className="font-pixel text-[7px] md:text-[8px] text-dim mt-2 leading-relaxed">
-        3 HP · УРОН 1 · УДАР ДОСТАЁТ С ДИСТАНЦИИ 1 · ПРЫЖОК ЗА КРАЙ ПОМОСТА = ПРОПАСТЬ
+        3 HP · КРИТ ПО ПРЫГУНУ = 2 УРОНА · УДАР ДОСТАЁТ С ДИСТАНЦИИ 1 · ЗА КРАЕМ ПОМОСТА — ПРОПАСТЬ
       </p>
     </div>
   );
@@ -279,6 +298,17 @@ function MenuScreen({
                     </span>
                     <span className="block font-body text-[10px] text-dim mt-0.5 leading-tight">
                       {m.title} · <span className="italic opacity-80">{m.quote}</span>
+                    </span>
+                    <span className="mt-1 flex items-center gap-0.5" title="Набор кубиков противника">
+                      {DICE_POOLS[PERSONALITY_KIND[p]].map((a, i) => (
+                        <span
+                          key={i}
+                          className="w-[18px] h-[18px] border border-[#070919] flex items-center justify-center"
+                          style={{ background: ACTION_META[a].dark, color: ACTION_META[a].color }}
+                        >
+                          <ActionIcon action={a} className="w-2.5 h-2.5" />
+                        </span>
+                      ))}
                     </span>
                   </button>
                 );
