@@ -21,6 +21,9 @@ import {
   IconSound,
 } from "./components/Icons";
 
+/** "any" = random opponent each battle. */
+type MenuChoice = Personality | "any";
+
 // ---------------------------------------------------------------- dice
 
 function HandDie({
@@ -194,8 +197,8 @@ function MenuScreen({
   setPers,
   onStart,
 }: {
-  pers: Personality;
-  setPers: (p: Personality) => void;
+  pers: MenuChoice;
+  setPers: (p: MenuChoice) => void;
   onStart: () => void;
 }) {
   return (
@@ -252,6 +255,31 @@ function MenuScreen({
                   </button>
                 );
               })}
+
+              {/* random opponent */}
+              <button
+                onClick={() => {
+                  initAudio();
+                  sfx.select();
+                  setPers("any");
+                }}
+                className={`no-select text-left border-[3px] border-[#070919] px-3 py-2 transition-all duration-100 ${
+                  pers === "any" ? "translate-x-1 bg-ink" : "bg-ink2 hover:bg-ink hover:translate-x-0.5"
+                }`}
+                style={
+                  pers === "any"
+                    ? { boxShadow: "inset 0 0 0 2px #3ddad7, 0 0 18px rgba(61,218,215,0.3)" }
+                    : undefined
+                }
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-pixel text-[11px] md:text-[12px] text-[#3ddad7]">СЛУЧАЙ</span>
+                  <span className="font-pixel text-[13px] text-[#3ddad7] anim-blink">?</span>
+                </span>
+                <span className="block font-body text-[11px] text-dim mt-0.5">
+                  Испытание судьбы · <span className="italic opacity-80">«Кого пришлёт помост — того и встретишь»</span>
+                </span>
+              </button>
             </div>
             <button
               onClick={onStart}
@@ -345,7 +373,7 @@ export default function App() {
   const [ui, setUi] = useState<UiSnapshot>(initialUi);
   // each slot stores an index into the rolled player hand (or null)
   const [slots, setSlots] = useState<(number | null)[]>([null, null, null]);
-  const [pers, setPers] = useState<Personality>("aggressor");
+  const [pers, setPers] = useState<MenuChoice>("aggressor");
   const [muted, setMutedState] = useState(isMuted());
   const [paused, setPaused] = useState(false);
 
@@ -404,7 +432,9 @@ export default function App() {
     setPaused(false);
     engine.paused = false;
     setSlots([null, null, null]);
-    engine.startMatch(pers);
+    const all: Personality[] = ["random", "aggressor", "controller", "mirror"];
+    const choice = pers === "any" ? all[Math.floor(Math.random() * all.length)] : pers;
+    engine.startMatch(choice);
   }, [engine, pers]);
 
   const togglePause = useCallback(() => {

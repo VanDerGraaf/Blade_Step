@@ -6,11 +6,12 @@ import {
   MatchStats,
   MAX_HP,
   PERSONALITIES,
+  PERSONALITY_KIND,
   Personality,
   PLAYER_START,
 } from "./types";
 import { aiPlan, resolveStep, rollHand, StepResult } from "./logic";
-import { drawFighter, drawShadow, ENEMY_LOOK, PLAYER_LOOK, Pose } from "./sprites";
+import { drawFighter, drawShadow, ENEMY_LOOKS, Look, PLAYER_LOOK, Pose } from "./sprites";
 import { sfx } from "./audio";
 
 export const VIEW_W = 960;
@@ -149,6 +150,7 @@ export class Engine {
 
   private p = mkFighter(PLAYER_START, 1);
   private e = mkFighter(ENEMY_START, -1);
+  private eLook: Look = ENEMY_LOOKS.oni;
   private particles: Particle[] = [];
   private timers: Timer[] = [];
   private tweens: Tween[] = [];
@@ -253,6 +255,7 @@ export class Engine {
     const tok = ++this.token;
     this.p = mkFighter(PLAYER_START, 1);
     this.e = mkFighter(ENEMY_START, -1);
+    this.eLook = ENEMY_LOOKS[PERSONALITY_KIND[pers]];
     this.particles = [];
     this.round = 1;
     this.stats = freshStats();
@@ -873,7 +876,7 @@ export class Engine {
     this.drawFighterShadow(ctx, this.p);
     this.drawFighterShadow(ctx, this.e);
     this.drawFighterBody(ctx, this.p, PLAYER_LOOK);
-    this.drawFighterBody(ctx, this.e, ENEMY_LOOK);
+    this.drawFighterBody(ctx, this.e, this.eLook);
     this.drawParticles(ctx);
 
     ctx.restore();

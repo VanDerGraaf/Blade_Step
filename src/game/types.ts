@@ -64,6 +64,18 @@ export const ACTION_META: Record<Action, ActionMeta> = {
 
 export type Personality = "random" | "aggressor" | "controller" | "mirror";
 
+/** Visual design of each enemy, tied to its AI personality. */
+export type EnemyKind = "scarecrow" | "oni" | "guard" | "kitsune";
+
+export const PERSONALITY_KIND: Record<Personality, EnemyKind> = {
+  random: "scarecrow",
+  aggressor: "oni",
+  controller: "guard",
+  mirror: "kitsune",
+};
+
+export const ENEMY_KINDS: EnemyKind[] = ["scarecrow", "oni", "guard", "kitsune"];
+
 export interface PersonalityMeta {
   name: string;
   title: string;
