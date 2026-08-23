@@ -1,11 +1,15 @@
-// P2P networking for duels — zero third-party signaling services.
+// P2P networking for duels — zero third-party services.
 //
-// Transport "online" — pure WebRTC (no PeerJS):
+// Transport "online" — pure WebRTC (no servers at all):
 //   host creates an INVITE (SDP offer with bundled ICE candidates, compressed),
 //   hands it to a friend through any messenger; the friend returns an ANSWER
 //   (SDP answer). Two pastes — and the data channel runs straight between the
 //   two browsers. Works over the internet (STUN for NAT traversal).
-// Transport "local" — BroadcastChannel: two tabs of the same browser, offline.
+// Transport "lan" — connect by IP through your own tiny relay server
+//   (tools/lan-server.cjs, zero dependencies, run with plain Node). Both
+//   players point the game at IP:PORT; the server pairs them and relays
+//   messages. Best on one LAN or with a port-forward; ideal for the packaged
+//   desktop app where two windows are separate processes.
 
 export type NetMsg =
   | { t: "hello"; name: string }
@@ -17,7 +21,6 @@ export type NetMsg =
   | { t: "quit" };
 
 export interface NetHooks {
-  onCode?: (code: string) => void; // local mode: room code
   onInvite?: (code: string) => void; // online: host invite ready
   onAnswer?: (code: string) => void; // online: guest answer ready
   onConnected: (peerName: string, isHost: boolean) => void;
@@ -26,31 +29,10 @@ export interface NetHooks {
   onError: (msg: string) => void;
 }
 
-export type Transport = "online" | "local";
+export type Transport = "online" | "lan";
 
-/**
- * Запущены ли мы как упакованное десктоп-приложение (Pake/Tauri), а не в обычном
- * браузере. Важно: в приложении каждое окно — отдельный процесс, поэтому
- * BroadcastChannel («две вкладки») между ними НЕ работает; соединяем окна по коду.
- */
-export const IS_STANDALONE: boolean = (() => {
-  try {
-    const w = window as unknown as { __TAURI__?: unknown };
-    if (w.__TAURI__) return true;
-    const proto = window.location.protocol;
-    if (proto !== "http:" && proto !== "https:" && proto !== "file:") return true; // tauri://, asset://…
-    if (typeof navigator !== "undefined" && /pake|tauri/i.test(navigator.userAgent)) return true;
-    return false;
-  } catch {
-    return false;
-  }
-})();
-
-/** Поддерживается ли WebRTC вообще (нужен безопасный контекст). */
-export const HAS_WEBRTC: boolean =
-  typeof RTCPeerConnection !== "undefined" && typeof RTCSessionDescription !== "undefined";
-
-const ABC = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const HAS_WEBRTC =
+  typeof RTCPeerConnection !== "undefined" && typeof window !== "undefined" && !!window.isSecureContext;
 
 const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -59,12 +41,6 @@ const RTC_CONFIG: RTCConfiguration = {
     { urls: "stun:global.stun.twilio.com:3478" },
   ],
 };
-
-function randCode(): string {
-  let s = "";
-  for (let i = 0; i < 4; i++) s += ABC[Math.floor(Math.random() * ABC.length)];
-  return s;
-}
 
 // ------------------------------------------------ SDP <-> short text code
 
@@ -127,12 +103,13 @@ function waitIce(pc: RTCPeerConnection): Promise<void> {
   });
 }
 
-type LMsg =
-  | { k: "hello-host"; code: string; from: string }
-  | { k: "accept"; code: string; to: string }
-  | { k: "msg"; code: string; from: string; m: NetMsg }
-  | { k: "hb"; code: string; from: string }
-  | { k: "bye"; code: string; from: string };
+// ------------------------------------------------ lan server protocol
+
+type LanSrv =
+  | { k: "role"; host: boolean }
+  | { k: "peer" }
+  | { k: "peer-left" }
+  | { k: "full" };
 
 class NetSession {
   private hooks: NetHooks | null = null;
@@ -141,22 +118,14 @@ class NetSession {
   private connectedFired = false;
   private dcTimer = 0;
 
-  private bc: BroadcastChannel | null = null;
-  private tabId = Math.random().toString(36).slice(2);
-  private roomCode = "";
-  private guestId: string | null = null;
-  private localRole: "host" | "guest" | null = null;
-  private localConnected = false;
-  private hbTimer = 0;
-  private watchTimer = 0;
-  private probeTimer = 0;
-  private lastSeen = 0;
+  private lanWs: WebSocket | null = null;
+  private lanFailed = false;
 
   transport: Transport = "online";
   isHost = false;
 
   get connected(): boolean {
-    return this.transport === "local" ? this.localConnected : this.connectedFired;
+    return this.connectedFired;
   }
 
   setHooks(hooks: NetHooks) {
@@ -167,7 +136,7 @@ class NetSession {
 
   /** Хост: создаём приглашение (SDP offer). */
   hostOnline() {
-    this.reset();
+    this.teardown();
     this.transport = "online";
     this.isHost = true;
     const pc = this.newPc();
@@ -197,7 +166,7 @@ class NetSession {
 
   /** Гость: готовимся принять приглашение. */
   joinOnline() {
-    this.reset();
+    this.teardown();
     this.transport = "online";
     this.isHost = false;
     const pc = this.newPc();
@@ -243,10 +212,7 @@ class NetSession {
   }
 
   private bindDc(dc: RTCDataChannel) {
-    dc.onopen = () => {
-      this.fireConnected();
-      this.send({ t: "hello", name: "Ронин" });
-    };
+    dc.onopen = () => this.fireConnected();
     dc.onmessage = (e) => {
       if (typeof e.data !== "string") return;
       try {
@@ -261,131 +227,118 @@ class NetSession {
     };
   }
 
-  private fireConnected() {
-    if (this.connectedFired) return;
-    this.connectedFired = true;
-    this.hooks?.onConnected("Соперник", this.isHost);
-  }
+  // ------------------------------------------------ lan (connect by IP)
 
-  private drop() {
-    if (!this.connectedFired && !this.pc) return;
-    this.hooks?.onDrop();
+  /** Подключение к своему relay-серверу: «192.168.1.5:5199» или «ws://…». */
+  lanConnect(addrRaw: string) {
     this.teardown();
-  }
-
-  // ------------------------------------------------ local (BroadcastChannel)
-
-  hostLocal() {
-    this.reset();
-    if (typeof BroadcastChannel === "undefined") {
-      this.hooks?.onError("Локальный режим не поддерживается этим браузером.");
+    this.transport = "lan";
+    this.isHost = false; // роль назначит сервер (первый вошедший — хост)
+    this.lanFailed = false;
+    const clean = addrRaw.trim().replace(/^wss?:\/\//i, "").replace(/\/+$/, "");
+    if (!clean || !/^[^\s:/]+(:\d+)?$/.test(clean)) {
+      this.hooks?.onError("Введите адрес вида 192.168.1.5:5199 (его показывает lan-server).");
       return;
     }
-    this.transport = "local";
-    this.isHost = true;
-    this.localRole = "host";
-    this.roomCode = randCode();
-    this.openChannel();
-    this.hooks?.onCode?.(this.roomCode);
-  }
-
-  joinLocal(code: string) {
-    this.reset();
-    if (typeof BroadcastChannel === "undefined") {
-      this.hooks?.onError("Локальный режим не поддерживается этим браузером.");
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(`ws://${clean}`);
+    } catch {
+      this.hooks?.onError("Неверный адрес. Пример: 192.168.1.5:5199");
       return;
     }
-    this.transport = "local";
-    this.isHost = false;
-    this.localRole = "guest";
-    this.roomCode = code.trim().toUpperCase();
-    this.openChannel();
-    this.lastSeen = performance.now();
-    this.bc?.postMessage({ k: "hello-host", code: this.roomCode, from: this.tabId } satisfies LMsg);
-    this.probeTimer = window.setInterval(() => {
-      if (this.localConnected) {
-        window.clearInterval(this.probeTimer);
-        return;
-      }
-      if (performance.now() - this.lastSeen > 6000) {
-        window.clearInterval(this.probeTimer);
+    this.lanWs = ws;
+
+    const failTimer = window.setTimeout(() => {
+      if (ws.readyState !== WebSocket.OPEN && !this.connectedFired) {
+        this.lanFailed = true;
         this.hooks?.onError(
-          "Комната не найдена на этом устройстве. Откройте вторую вкладку, создайте комнату и введите её код."
+          "Не удалось подключиться. Проверьте адрес, что сервер запущен (node tools/lan-server.cjs) и брандмауэр не блокирует порт."
         );
-        this.teardown();
+        try {
+          ws.close();
+        } catch {
+          /* noop */
+        }
+      }
+    }, 8000);
+
+    ws.onmessage = (e) => {
+      if (typeof e.data !== "string") return;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(e.data);
+      } catch {
         return;
       }
-      this.bc?.postMessage({ k: "hello-host", code: this.roomCode, from: this.tabId } satisfies LMsg);
-    }, 500);
-  }
-
-  private openChannel() {
-    this.bc = new BroadcastChannel("bladestep-local-v1");
-    this.bc.onmessage = (ev) => this.onLocal(ev.data as LMsg);
-    this.hbTimer = window.setInterval(() => {
-      if (!this.localConnected) return;
-      this.bc?.postMessage({ k: "hb", code: this.roomCode, from: this.tabId } satisfies LMsg);
-    }, 1200);
-    this.watchTimer = window.setInterval(() => {
-      if (this.localConnected && performance.now() - this.lastSeen > 4500) {
-        this.hooks?.onDrop();
-        this.teardown();
+      const m = raw as LanSrv | NetMsg;
+      if ("k" in m) {
+        if (m.k === "role") this.isHost = m.host;
+        else if (m.k === "peer") {
+          window.clearTimeout(failTimer);
+          this.fireConnected();
+        } else if (m.k === "peer-left") this.drop();
+        else if (m.k === "full") {
+          this.lanFailed = true;
+          this.hooks?.onError("Комната уже занята двумя бойцами. Дождитесь конца их дуэли.");
+          try {
+            ws.close();
+          } catch {
+            /* noop */
+          }
+        }
+        return;
       }
-    }, 1000);
-  }
-
-  private onLocal(m: LMsg) {
-    if (!m || m.code !== this.roomCode) return;
-    switch (m.k) {
-      case "hello-host":
-        if (this.localRole === "host" && !this.guestId) {
-          this.guestId = m.from;
-          this.localConnected = true;
-          this.lastSeen = performance.now();
-          this.bc?.postMessage({ k: "accept", code: this.roomCode, to: m.from } satisfies LMsg);
-          this.send({ t: "hello", name: "Ронин" });
-          this.hooks?.onConnected("Соперник", true);
-        }
-        break;
-      case "accept":
-        if (this.localRole === "guest" && m.to === this.tabId) {
-          this.localConnected = true;
-          this.lastSeen = performance.now();
-          this.send({ t: "hello", name: "Ронин" });
-          this.hooks?.onConnected("Соперник", false);
-        }
-        break;
-      case "msg":
-        if (this.localConnected) {
-          this.lastSeen = performance.now();
-          this.hooks?.onMsg(m.m);
-        }
-        break;
-      case "hb":
-        if (this.localConnected) this.lastSeen = performance.now();
-        break;
-      case "bye":
-        if (this.localConnected) {
-          this.hooks?.onDrop();
-          this.teardown();
-        }
-        break;
-    }
+      if (m && typeof m === "object" && "t" in m) this.hooks?.onMsg(m as NetMsg);
+    };
+    ws.onclose = () => {
+      window.clearTimeout(failTimer);
+      if (this.connectedFired) this.drop();
+      else if (!this.lanFailed) {
+        this.lanFailed = true;
+        this.hooks?.onError("Сервер закрыл соединение.");
+      }
+    };
+    ws.onerror = () => {
+      /* onclose доложит */
+    };
   }
 
   // ------------------------------------------------ common
 
+  private fireConnected() {
+    if (this.connectedFired) return;
+    this.connectedFired = true;
+    this.send({ t: "hello", name: "Ронин" });
+    this.hooks?.onConnected("Соперник", this.isHost);
+  }
+
+  private drop() {
+    if (!this.connectedFired) return;
+    this.hooks?.onDrop();
+    this.teardown();
+  }
+
   send(m: NetMsg) {
-    if (this.transport === "local") {
-      if (this.localConnected) {
-        this.bc?.postMessage({ k: "msg", code: this.roomCode, from: this.tabId, m } satisfies LMsg);
-      }
+    if (this.transport === "lan") {
+      if (this.lanWs?.readyState === WebSocket.OPEN) this.lanWs.send(JSON.stringify(m));
       return;
     }
     if (this.dc?.readyState === "open") this.dc.send(JSON.stringify(m));
   }
 
-  private softReset() {
+  teardown() {
+    const ws = this.lanWs;
+    this.lanWs = null;
+    if (ws) {
+      ws.onclose = null;
+      ws.onmessage = null;
+      try {
+        ws.close();
+      } catch {
+        /* noop */
+      }
+    }
     window.clearTimeout(this.dcTimer);
     try {
       this.dc?.close();
@@ -400,32 +353,6 @@ class NetSession {
     this.dc = null;
     this.pc = null;
     this.connectedFired = false;
-  }
-
-  private reset() {
-    this.teardown();
-  }
-
-  teardown() {
-    if (this.transport === "local" && this.bc) {
-      if (this.localConnected) {
-        this.bc.postMessage({ k: "bye", code: this.roomCode, from: this.tabId } satisfies LMsg);
-      }
-      window.clearInterval(this.hbTimer);
-      window.clearInterval(this.watchTimer);
-      window.clearInterval(this.probeTimer);
-      try {
-        this.bc.close();
-      } catch {
-        /* noop */
-      }
-      this.bc = null;
-      this.localConnected = false;
-      this.guestId = null;
-      this.localRole = null;
-      this.roomCode = "";
-    }
-    this.softReset();
   }
 }
 

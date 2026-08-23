@@ -13,7 +13,7 @@ import {
   SPECIAL_ACTIONS,
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
-import { HAS_WEBRTC, IS_STANDALONE, net, NetMsg, Transport } from "./game/net";
+import { HAS_WEBRTC, net, NetMsg, Transport } from "./game/net";
 import { FighterPreview } from "./components/FighterPreview";
 import type { FighterKind } from "./game/sprites";
 
@@ -227,14 +227,13 @@ function ThreatSkulls({ n, color }: { n: number; color: string }) {
 
 interface NetPanelProps {
   state: "off" | "hosting" | "joining" | "connected";
-  code: string; // local room code
-  join: string;
-  setJoin: (v: string) => void;
+  ip: string; // lan: server address
+  setIp: (v: string) => void;
   error: string;
   transport: Transport;
   setTransport: (t: Transport) => void;
-  onCreate: () => void; // host (both transports)
-  onJoin: () => void; // guest, local transport
+  onCreate: () => void; // host, online transport
+  onConnectLan: () => void; // both roles, lan transport
   onCancel: () => void;
   // pure WebRTC (online transport)
   invite: string;
@@ -375,30 +374,18 @@ function MenuScreen({
                     netPanel.transport === "online" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
                   }`}
                 >
-                  {IS_STANDALONE ? "СОЕДИНЕНИЕ ПО КОДУ" : "ИНТЕРНЕТ · БЕЗ СЕРВЕРА"}
+                  ПО КОДУ · БЕЗ СЕРВЕРА
                 </button>
                 <button
-                  onClick={() => !IS_STANDALONE && netPanel.setTransport("local")}
-                  disabled={netPanel.state !== "off" || IS_STANDALONE}
-                  title={IS_STANDALONE ? "Недоступно: окна приложения — отдельные процессы" : undefined}
+                  onClick={() => netPanel.setTransport("lan")}
+                  disabled={netPanel.state !== "off"}
                   className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
-                    IS_STANDALONE
-                      ? "bg-ink2 text-dim/40 cursor-not-allowed"
-                      : netPanel.transport === "local"
-                        ? "bg-[#0e6b69] text-paper"
-                        : "bg-ink2 text-dim"
+                    netPanel.transport === "lan" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
                   }`}
                 >
-                  {IS_STANDALONE ? "ДВЕ ВКЛАДКИ (браузер)" : "ДВЕ ВКЛАДКИ"}
+                  ПО IP · СВОЙ СЕРВЕР
                 </button>
               </div>
-
-              {IS_STANDALONE && netPanel.state === "off" && (
-                <p className="font-body text-[9px] text-dim/80 leading-snug mb-2">
-                  Вы в приложении: два окна на этом ПК соединяются «по коду» — создайте дуэль в одном
-                  окне и вставьте код во втором. Работает и без интернета.
-                </p>
-              )}
 
               {netPanel.state === "off" && (
                 <div className="flex flex-col gap-1.5">
@@ -423,62 +410,32 @@ function MenuScreen({
                     </>
                   ) : (
                     <>
-                      <button
-                        onClick={netPanel.onCreate}
-                        className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
-                      >
-                        СОЗДАТЬ КОМНАТУ
-                      </button>
                       <div className="flex gap-1.5">
                         <input
-                          value={netPanel.join}
-                          onChange={(e) => netPanel.setJoin(e.target.value.toUpperCase().slice(0, 4))}
-                          placeholder="КОД"
-                          className="font-pixel flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-[0.3em] text-center placeholder:text-[#39406e] placeholder:tracking-normal outline-none focus:border-[#3ddad7]"
+                          value={netPanel.ip}
+                          onChange={(e) => netPanel.setIp(e.target.value.trim())}
+                          placeholder="192.168.1.5:5199"
+                          spellCheck={false}
+                          className="font-body flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-wider placeholder:text-[#39406e] outline-none focus:border-[#3ddad7]"
                         />
                         <button
-                          onClick={netPanel.onJoin}
-                          className="px-btn no-select px-4 py-2 bg-panel text-paper text-[10px]"
+                          onClick={netPanel.onConnectLan}
+                          disabled={!netPanel.ip.trim()}
+                          className="px-btn no-select px-4 py-2 bg-[#0e6b69] text-paper text-[10px] disabled:opacity-35"
                         >
                           ВОЙТИ
                         </button>
                       </div>
                       <p className="font-body text-[9px] text-dim/70 leading-tight">
-                        Один игрок создаёт комнату, второй открывает вкладку этого же браузера и входит
-                        по коду. Работает без интернета.
+                        На машине хоста запустите <span className="text-[#3ddad7]">node tools/lan-server.cjs</span> —
+                        сервер покажет IP. Оба игрока вводят этот «IP:порт» здесь. Работает в локальной
+                        сети без интернета; для игры через сеть — проброс порта.
                       </p>
                     </>
                   )}
                   {netPanel.error && (
                     <p className="font-body text-[10px] text-blood leading-tight">{netPanel.error}</p>
                   )}
-                </div>
-              )}
-
-              {netPanel.state === "hosting" && netPanel.transport === "local" && (
-                <div className="text-center">
-                  <p className="font-body text-[10px] text-dim mb-1">Код комнаты:</p>
-                  <button
-                    onClick={() => netPanel.onCopy(netPanel.code, "code")}
-                    title="Скопировать код"
-                    className="font-pixel text-[26px] text-[#3ddad7] tracking-[0.25em] mb-1 drop-shadow-[3px_3px_0_#070919] hover:text-paper transition-colors cursor-pointer"
-                  >
-                    {netPanel.code}
-                  </button>
-                  <p className="font-body text-[9px] mb-1.5">
-                    {netPanel.copied === "code" ? (
-                      <span className="text-[#2a9d8f] font-pixel text-[7px]">СКОПИРОВАНО!</span>
-                    ) : (
-                      <span className="text-dim/70">клик по коду — скопировать</span>
-                    )}
-                  </p>
-                  <p className="font-body text-[10px] text-dim mb-2">
-                    Откройте вторую вкладку этой страницы и введите код. Ждём…{" "}
-                    <span className="anim-blink">▮</span>
-                  </p>
-                  <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
-                    ОТМЕНА
-                  </button>
                 </div>
               )}
 
@@ -538,11 +495,14 @@ function MenuScreen({
                 </div>
               )}
 
-              {netPanel.state === "joining" && netPanel.transport === "local" && (
+              {netPanel.state === "joining" && netPanel.transport === "lan" && (
                 <div className="text-center">
                   <p className="font-body text-[10px] text-dim mb-2">
-                    Подключаемся к комнате <span className="text-[#3ddad7] font-pixel">{netPanel.join}</span>…{" "}
+                    Подключаемся к <span className="text-[#3ddad7] font-pixel">{netPanel.ip}</span>…{" "}
                     <span className="anim-blink">▮</span>
+                  </p>
+                  <p className="font-body text-[9px] text-dim/70 leading-tight mb-2">
+                    Первый вошедший — хост. Когда войдёт второй боец, бой начнётся автоматически.
                   </p>
                   {netPanel.error && (
                     <p className="font-body text-[10px] text-blood leading-tight mb-2">{netPanel.error}</p>
@@ -860,13 +820,12 @@ export default function App() {
   // ---- сетевая дуэль ----
   const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
   const [netTransport, setNetTransport] = useState<Transport>("online");
-  const [roomCode, setRoomCode] = useState("");
+  const [ipAddr, setIpAddr] = useState(""); // lan: адрес relay-сервера
   const [inviteCode, setInviteCode] = useState(""); // хост: приглашение для друга
   const [answerCode, setAnswerCode] = useState(""); // гость: ответ для хоста
   const [inviteInput, setInviteInput] = useState(""); // гость вставляет приглашение
   const [answerInput, setAnswerInput] = useState(""); // хост вставляет ответ
   const [copied, setCopied] = useState<string | null>(null);
-  const [joinCode, setJoinCode] = useState("");
   const [netPeerName, setNetPeerName] = useState("Соперник");
   const [netError, setNetError] = useState("");
   const [netDrop, setNetDrop] = useState(false);
@@ -892,8 +851,7 @@ export default function App() {
 
   const resetNetUi = useCallback(() => {
     setNetState("off");
-    setRoomCode("");
-    setJoinCode("");
+    setIpAddr("");
     setInviteCode("");
     setAnswerCode("");
     setInviteInput("");
@@ -959,11 +917,6 @@ export default function App() {
   // сетевые события: подключение, сообщения, разрыв
   useEffect(() => {
     const hooks = {
-      onCode: (code: string) => {
-        setRoomCode(code);
-        setNetState("hosting");
-        setNetError("");
-      },
       onInvite: (code: string) => {
         setInviteCode(code);
         setNetError("");
@@ -1015,7 +968,6 @@ export default function App() {
       onError: (msg: string) => {
         setNetError(msg);
         setNetState("off");
-        setRoomCode("");
         setInviteCode("");
         setAnswerCode("");
       },
@@ -1107,36 +1059,32 @@ export default function App() {
   }, [engine, pers, netState]);
 
   // ---- сетевые действия из меню ----
+  /** Хост режима «по коду» (чистый WebRTC). */
   const createRoom = useCallback(() => {
-    initAudio();
-    sfx.select();
-    setNetError("");
-    setJoinCode("");
-    if (netTransport === "local" && !IS_STANDALONE) {
-      net.hostLocal();
-    } else {
-      if (!HAS_WEBRTC) {
-        setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
-        return;
-      }
-      net.hostOnline();
-    }
-    setNetState("hosting");
-  }, [netTransport]);
-
-  /** Вход по коду — только для локального режима (две вкладки). */
-  const joinRoom = useCallback(() => {
-    const code = joinCode.trim().toUpperCase();
-    if (code.length < 4) {
-      setNetError("Введите код комнаты (4 символа).");
+    if (!HAS_WEBRTC) {
+      setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
       return;
     }
     initAudio();
     sfx.select();
     setNetError("");
-    net.joinLocal(code);
+    net.hostOnline();
+    setNetState("hosting");
+  }, []);
+
+  /** Вход по IP через свой relay-сервер (tools/lan-server.cjs). */
+  const connectLan = useCallback(() => {
+    const addr = ipAddr.trim();
+    if (!addr) {
+      setNetError("Введите адрес сервера, например 192.168.1.5:5199.");
+      return;
+    }
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.lanConnect(addr);
     setNetState("joining");
-  }, [joinCode]);
+  }, [ipAddr]);
 
   /** Гость (интернет): готовимся принять приглашение. */
   const guestStart = useCallback(() => {
@@ -1576,14 +1524,13 @@ export default function App() {
           onStart={startMatch}
           netPanel={{
             state: netState,
-            code: roomCode,
-            join: joinCode,
-            setJoin: setJoinCode,
+            ip: ipAddr,
+            setIp: setIpAddr,
             error: netError,
             transport: netTransport,
             setTransport: setNetTransport,
             onCreate: createRoom,
-            onJoin: joinRoom,
+            onConnectLan: connectLan,
             onCancel: cancelNet,
             invite: inviteCode,
             answer: answerCode,
