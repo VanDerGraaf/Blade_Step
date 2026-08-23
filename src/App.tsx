@@ -11,6 +11,7 @@ import {
 } from "./game/types";
 import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
 import { net, NetMsg, Transport } from "./game/net";
+import { detectLanIp, detectPublicIp } from "./game/netutil";
 import {
   ActionIcon,
   IconHeart,
@@ -209,6 +210,27 @@ interface NetPanelProps {
   serverInput: string;
   setServerInput: (v: string) => void;
   onApplyServer: () => void;
+  onLocalPc: () => void;
+  ipLan: string | null;
+  ipPub: string | null;
+  copied: string | null;
+  onCopy: (text: string, key: string) => void;
+}
+
+/** Моноширинный чип с кнопкой «скопировать» и живой обратной связью. */
+function CopyChip({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
+  return (
+    <button
+      onClick={onCopy}
+      title="Скопировать"
+      className={`inline-flex items-center gap-1 align-middle px-1.5 py-px border-2 border-[#070919] font-body text-[10px] whitespace-nowrap transition-colors duration-100 ${
+        copied ? "bg-[#2a9d8f] text-[#062521]" : "bg-ink2 text-[#3ddad7] hover:bg-ink"
+      }`}
+    >
+      {text}
+      <span className="font-pixel text-[6px] opacity-80">{copied ? "ГОТОВО" : "⧉"}</span>
+    </button>
+  );
 }
 
 function MenuScreen({
@@ -347,6 +369,13 @@ function MenuScreen({
                       className="font-body flex-1 min-w-0 px-2 py-1 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[10px] outline-none focus:border-[#3ddad7]"
                     />
                     <button
+                      onClick={netPanel.onLocalPc}
+                      title="Сервер знакомств запущен на этом компьютере (npx peerjs --port 9000)"
+                      className="px-btn no-select px-2 py-1 bg-[#0e6b69] text-paper text-[7px]"
+                    >
+                      НА ПК
+                    </button>
+                    <button
                       onClick={netPanel.onApplyServer}
                       className="px-btn no-select px-2 py-1 bg-ink2 text-dim text-[7px]"
                     >
@@ -397,14 +426,74 @@ function MenuScreen({
               {netPanel.state === "hosting" && (
                 <div className="text-center">
                   <p className="font-body text-[10px] text-dim mb-1">Код комнаты:</p>
-                  <p className="font-pixel text-[26px] text-[#3ddad7] tracking-[0.25em] mb-1.5 drop-shadow-[3px_3px_0_#070919]">
+                  <button
+                    onClick={() => netPanel.onCopy(netPanel.code, "code")}
+                    title="Скопировать код"
+                    className="font-pixel text-[26px] text-[#3ddad7] tracking-[0.25em] mb-1 drop-shadow-[3px_3px_0_#070919] hover:text-paper transition-colors cursor-pointer"
+                  >
                     {netPanel.code}
+                  </button>
+                  <p className="font-body text-[9px] mb-1.5">
+                    {netPanel.copied === "code" ? (
+                      <span className="text-[#2a9d8f] font-pixel text-[7px]">СКОПИРОВАНО!</span>
+                    ) : (
+                      <span className="text-dim/70">клик по коду — скопировать</span>
+                    )}
                   </p>
-                  <p className="font-body text-[10px] text-dim mb-2">
-                    {netPanel.transport === "local"
-                      ? "Откройте вторую вкладку этой страницы и введите код. "
-                      : "Передайте код второму игроку. "}
-                    Ждём… <span className="anim-blink">▮</span>
+
+                  {netPanel.transport === "local" ? (
+                    <p className="font-body text-[10px] text-dim mb-2">
+                      Откройте вторую вкладку этой страницы и введите код. Ждём… <span className="anim-blink">▮</span>
+                    </p>
+                  ) : netPanel.serverLabel.includes("0.peerjs.com") ? (
+                    <p className="font-body text-[10px] text-dim mb-2">
+                      Передайте код второму игроку — сервер общий (облако), IP не нужен. Ждём…{" "}
+                      <span className="anim-blink">▮</span>
+                    </p>
+                  ) : (
+                    (() => {
+                      const port = netPanel.serverLabel.split(":")[1] || "9000";
+                      const lanAddr = `${netPanel.ipLan ?? "ВАШ-IP"}:${port}`;
+                      const pubAddr = `${netPanel.ipPub ?? "ПУБЛИЧНЫЙ-IP"}:${port}`;
+                      return (
+                        <div className="text-left px-2 py-1.5 mb-2 bg-ink2 border-2 border-[#070919]">
+                          <p className="font-pixel text-[7px] text-[#3ddad7] mb-1.5">
+                            ПРИГЛАСИТЕ ПО ВАШЕМУ IP
+                          </p>
+                          <p className="font-body text-[10px] text-dim leading-relaxed">
+                            Друг вводит в поле «СЕРВЕР»{" "}
+                            <CopyChip
+                              text={lanAddr}
+                              copied={netPanel.copied === "lan"}
+                              onCopy={() => netPanel.onCopy(lanAddr, "lan")}
+                            />{" "}
+                            (одна сеть) или{" "}
+                            <CopyChip
+                              text={pubAddr}
+                              copied={netPanel.copied === "pub"}
+                              onCopy={() => netPanel.onCopy(pubAddr, "pub")}
+                            />{" "}
+                            (интернет), затем код{" "}
+                            <CopyChip
+                              text={netPanel.code}
+                              copied={netPanel.copied === "code2"}
+                              onCopy={() => netPanel.onCopy(netPanel.code, "code2")}
+                            />
+                          </p>
+                          <p className="font-body text-[9px] text-dim/70 mt-1 leading-snug">
+                            Ваш IP: сеть — <span className="text-paper">{netPanel.ipLan ?? "не определился (ipconfig / ifconfig)"}</span>
+                            {" · "}интернет — <span className="text-paper">{netPanel.ipPub ?? "—"}</span>
+                            <br />
+                            Сервер <span className="text-[#3ddad7]">npx peerjs --port {port}</span> на вашей машине должен
+                            оставаться запущенным.
+                          </p>
+                        </div>
+                      );
+                    })()
+                  )}
+
+                  <p className="font-body text-[9px] text-dim mb-2">
+                    Ждём второго бойца… <span className="anim-blink">▮</span>
                   </p>
                   <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
                     ОТМЕНА
@@ -560,6 +649,9 @@ export default function App() {
     const c = net.getCustomServer();
     return c ? `${c.host}:${c.port}` : "0.peerjs.com (облако)";
   });
+  const [ipLan, setIpLan] = useState<string | null>(null);
+  const [ipPub, setIpPub] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState("");
   const [netPeerName, setNetPeerName] = useState("Соперник");
   const [netError, setNetError] = useState("");
@@ -782,6 +874,40 @@ export default function App() {
     setServerInput("");
     sfx.tick();
   }, [serverInput]);
+
+  /** Быстрая кнопка: сигнальный сервер крутится на этом же компьютере. */
+  const serverLocalPc = useCallback(() => {
+    net.setCustomServer("localhost:9000");
+    setServerLabel("localhost:9000");
+    setServerInput("");
+    sfx.select();
+  }, []);
+
+  const copyText = useCallback((text: string, key: string) => {
+    const done = () => {
+      sfx.slot();
+      setCopied(key);
+      window.setTimeout(() => setCopied((c) => (c === key ? null : c)), 1300);
+    };
+    try {
+      navigator.clipboard?.writeText(text).then(done).catch(done);
+    } catch {
+      done();
+    }
+  }, []);
+
+  // пока комната открыта через свой сервер — определяем IP хоста для приглашения
+  useEffect(() => {
+    if (!(netState === "hosting" && netTransport === "online")) return;
+    let alive = true;
+    setIpLan(null);
+    setIpPub(null);
+    detectLanIp().then((ip) => alive && setIpLan(ip));
+    detectPublicIp().then((ip) => alive && setIpPub(ip));
+    return () => {
+      alive = false;
+    };
+  }, [netState, netTransport]);
 
   const cancelNet = useCallback(() => {
     net.send({ t: "quit" });
@@ -1186,6 +1312,11 @@ export default function App() {
             serverInput,
             setServerInput,
             onApplyServer: applyServer,
+            onLocalPc: serverLocalPc,
+            ipLan,
+            ipPub,
+            copied,
+            onCopy: copyText,
           }}
         />
       )}
