@@ -1,6 +1,6 @@
 import { Action, BOARD_SIZE, Personality } from "./types";
 
-export type MoveKind = "none" | "walk" | "bump" | "leap" | "roll" | "knock" | "fall";
+export type MoveKind = "none" | "walk" | "bump" | "leap" | "roll" | "knock" | "fall" | "knockfall";
 
 export interface MoveInfo {
   from: number;
@@ -106,11 +106,10 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
       if (act === "strike" && dist === 1) return "antiair";
       return "whiff";
     }
-    // out of reach -> swing at air
-    if (dist !== 1) return "whiff";
-    // adjacent: did they step back out of range?
-    const retreated = Math.abs(oppMv.to - myStart) > dist;
-    if (retreated) return "whiff";
+    // simultaneous: the blow lands if, after both move, the target is adjacent.
+    // So walking INTO the striker's blade still gets you cut; stepping back escapes.
+    const finalDist = Math.abs(oppMv.to - myStart);
+    if (finalDist !== 1) return "whiff";
     if (oppAct === "dodge") return "dodged";
     if (oppAct === "block") return "blocked";
     if (oppAct === "bash") return "bashed";
@@ -141,9 +140,16 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
   if (pStrike === "bashed" || pStrike === "reflected") dmgToP += 1;
   if (eStrike === "bashed" || eStrike === "reflected") dmgToE += 1;
 
-  // knockback: striker who hit a block or a shield-bash is pushed back 1
-  if (pStrike === "blocked" || pStrike === "bashed") pMv = move(pPos, clampPos(pPos - pDir), "knock");
-  if (eStrike === "blocked" || eStrike === "bashed") eMv = move(ePos, clampPos(ePos - eDir), "knock");
+  // knockback: striker who hit a block or a shield-bash is pushed back 1;
+  // pushed off the board -> knocked into the abyss
+  if (pStrike === "blocked" || pStrike === "bashed") {
+    const kb = pPos - pDir;
+    pMv = kb < 0 || kb > BOARD_SIZE - 1 ? move(pPos, kb, "knockfall") : move(pPos, kb, "knock");
+  }
+  if (eStrike === "blocked" || eStrike === "bashed") {
+    const kb = ePos - eDir;
+    eMv = kb < 0 || kb > BOARD_SIZE - 1 ? move(ePos, kb, "knockfall") : move(ePos, kb, "knock");
+  }
 
   // head-on: both walk into the same tile
   if (
@@ -188,8 +194,9 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
   pMv = resolveLeap(pMv, eMv, eAct, pPos, ePos, pDir);
   eMv = resolveLeap(eMv, pMv, pAct, ePos, pPos, eDir);
 
-  const pFall = pMv.kind === "fall";
-  const eFall = eMv.kind === "fall";
+  const isFall = (k: MoveKind) => k === "fall" || k === "knockfall";
+  const pFall = isFall(pMv.kind);
+  const eFall = isFall(eMv.kind);
 
   // ---------- log ----------
   const name = (s: StrikeResult) =>

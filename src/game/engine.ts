@@ -805,6 +805,31 @@ export class Engine {
         });
         break;
       }
+      case "knockfall": {
+        // отброшен блоком/щитом за край — сбит, а не прыгает
+        sfx.block();
+        this.setPose(f, "hurt", 500);
+        f.flash = 0.8;
+        const dir = Math.sign(mv.to - mv.from) || 1;
+        const fromX = tileCenter(mv.from);
+        const edgeX = dir > 0 ? VIEW_W + 60 : -60;
+        this.dust(f.x, GROUND_Y, 6, 0.7);
+        this.tween(360, (t) => {
+          f.x = fromX + (fromX + dir * (TILE_W * 1.4) - fromX) * t;
+          f.air = Math.sin(Math.PI * Math.min(1, t * 1.1)) * 60;
+        }, (t) => t, tok).then(() => {
+          sfx.fall();
+          this.shake(0.55);
+          this.slowMo(0.4, 650, tok);
+          this.tween(520, (t) => {
+            f.x = fromX + dir * TILE_W * 1.4 + (edgeX - fromX - dir * TILE_W * 1.4) * t;
+            f.air = 60 * (1 - t) - 260 * t * t;
+          }, easeIn, tok).then(() => {
+            f.dead = true;
+          });
+        });
+        break;
+      }
       default:
         break;
     }
