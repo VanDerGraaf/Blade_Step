@@ -328,6 +328,7 @@ function counterOf(a: Action, dist: number): Weights {
     case "strike": return dist <= 1 ? { dodge: 44, block: 36, strike: 20 } : { fwd: 46, jump: 30, strike: 24 };
     case "block": return { jump: 52, fwd: 32, strike: 16 };
     case "wait": return { strike: 60, fwd: 30, jump: 10 }; // free hit on a frozen foe
+    case "rest": return { strike: 56, fwd: 30, jump: 14 }; // free hit on an idling dummy
     case "roll": return { block: 52, strike: 28, fwd: 20 };
     case "cleave": return { jump: 56, block: 30, dodge: 14 };
     case "bash": return { dodge: 40, back: 34, fwd: 26 };
@@ -382,7 +383,8 @@ export function aiPlan(pers: Personality, ctx: AiContext, hand: Action[]): Actio
     let w: Weights;
     switch (pers) {
       case "random":
-        w = sanitize({ fwd: 1, back: 1, jump: 1, dodge: 1, strike: 1, block: 1 }, ctx);
+        // Болванчик: две из шести граней — пустой «Отдых», манекен иногда просто стоит
+        w = sanitize({ fwd: 1, back: 1, jump: 1, dodge: 1, strike: 1, block: 1, rest: 1 }, ctx);
         break;
       case "aggressor":
         w = aggressorWeights(ctx, slot, plan[slot - 1] ?? null);

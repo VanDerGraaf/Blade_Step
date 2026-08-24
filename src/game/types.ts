@@ -1,5 +1,6 @@
 /**
  * wait   — внутреннее действие «ничего не делать» (тайм-аут в сетевой игре).
+ * rest   — Отдых (Болванчик): намеренно ничего не делает — просто стоит. Пустая грань.
  * roll   — Перекат (Шиноби): рывок на 2 клетки понизу, неуязвим, проскальзывает под врагом.
  * cleave — Рассечение (Они): удар на 2 урона, мажет по прыгающим.
  * bash   — Удар щитом (Страж): при вашей атаке гасит её, вы получаете 1 урон и отлетаете.
@@ -7,17 +8,17 @@
  */
 export type Action =
   | "fwd" | "back" | "jump" | "dodge" | "strike" | "block" | "wait"
-  | "roll" | "cleave" | "bash" | "reflect";
+  | "roll" | "cleave" | "bash" | "reflect" | "rest";
 
 /** Колода игрока-ронина. */
 export const ACTIONS: Action[] = ["fwd", "back", "jump", "dodge", "strike", "block"];
 
 /** Особые грани врагов (вне колоды игрока). */
-export const SPECIAL_ACTIONS: Action[] = ["roll", "cleave", "bash", "reflect"];
+export const SPECIAL_ACTIONS: Action[] = ["roll", "cleave", "bash", "reflect", "rest"];
 
 /** Наборы кубиков: из этих граней каждый боец бросает свою руку (6 кубиков). */
 export const DICE_POOLS: Record<EnemyKind | "ronin", Action[]> = {
-  scarecrow: ["fwd", "back", "dodge", "strike"], // учебный манекен: без прыжка и блока
+  scarecrow: ["fwd", "back", "dodge", "strike", "rest", "rest"], // учебный манекен: без прыжка и блока, 2 пустые грани
   oni: ["fwd", "back", "jump", "block", "strike", "cleave"], // рассечение вместо уклонения
   guard: ["fwd", "back", "dodge", "strike", "block", "bash"], // удар щитом вместо прыжка
   kitsune: ["fwd", "back", "jump", "dodge", "strike", "reflect"], // отражение вместо блока
@@ -122,6 +123,14 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     dark: "#5b2a8a",
     desc: "Если в этот шаг по кицунэ бьют: удар гасится, атакующий получает 1 урон. Не бьют — грань свистит в пустоту.",
     tip: "Грань Зеркала. Блефуй и трать её впустую.",
+  },
+  rest: {
+    name: "Отдых",
+    short: "ОТДЫХ",
+    color: "#c9a96e",
+    dark: "#7a6238",
+    desc: "Болванчик замирает и ничего не делает — просто стоит. Ни движения, ни атаки, ни защиты: легкая мишень.",
+    tip: "Пустая грань Болванчика. Дыши и планируй спокойно.",
   },
 };
 

@@ -377,6 +377,27 @@ const REFLECT_ROWS = [
 ];
 export const IconReflect = ({ className }: { className?: string }) => <Px rows={REFLECT_ROWS} className={className} />;
 
+// Отдых — болванчик на колышке: стоит и ничего не делает
+const REST_ROWS = [
+  "................",
+  ".....#####......",
+  "....#######.....",
+  "....#######.....",
+  ".....#####......",
+  ".......#........",
+  "...#########....",
+  ".......#........",
+  ".......#........",
+  ".......#........",
+  ".......#........",
+  "......###.......",
+  ".....#####......",
+  "................",
+  "................",
+  "................",
+];
+export const IconRest = ({ className }: { className?: string }) => <Px rows={REST_ROWS} className={className} />;
+
 export function ActionIcon({ action, className }: { action: Action; className?: string }) {
   switch (action) {
     case "fwd":
@@ -399,6 +420,8 @@ export function ActionIcon({ action, className }: { action: Action; className?: 
       return <IconBash className={className} />;
     case "reflect":
       return <IconReflect className={className} />;
+    case "rest":
+      return <IconRest className={className} />;
     case "wait":
       return <IconWait className={className} />;
   }
