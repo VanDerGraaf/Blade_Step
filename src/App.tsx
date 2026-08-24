@@ -952,7 +952,7 @@ function LobbyScreen({
           </h2>
 
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-5">
-            {FIGHTER_OPTIONS.map((o) => {
+            {FIGHTER_OPTIONS.filter((o) => o.kind !== "golden" || goldenUnlocked).map((o) => {
               const mine = myKind === o.kind;
               const theirs = peerKind === o.kind;
               return (
@@ -1931,6 +1931,7 @@ export default function App() {
           myKind={myKind}
           peerKind={peerKind}
           peerName={netPeerName}
+          goldenUnlocked={goldenUnlocked}
           onPick={pickKind}
           onStart={startFromLobby}
         />

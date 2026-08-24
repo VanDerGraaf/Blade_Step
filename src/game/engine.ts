@@ -419,9 +419,8 @@ export class Engine {
   /** Начало пути: HP полное, первый враг — Болванчик. */
   startGauntlet(useGolden: boolean) {
     this.useGolden = useGolden;
-    this.p.hp = MAX_HP;
     this.gauntletIndex = 0;
-    this.patch({ gauntletIndex: 0, gauntletHealed: false });
+    this.patch({ gauntletIndex: 0, gauntletHealed: false, pHp: MAX_HP });
     this.startGauntletFight();
   }
 
@@ -464,7 +463,7 @@ export class Engine {
   }
 
   fight(plan: Action[]) {
-    if (this.ui.phase !== "plan" || this.mode !== "ai") return;
+    if (this.ui.phase !== "plan" || this.mode === "net") return;
     const tok = this.token;
     this.pPlan = plan;
     this.patch({ phase: "thinking", playerPlan: [...plan], enemyPlan: [null, null, null], enemyRevealed: 0 });
