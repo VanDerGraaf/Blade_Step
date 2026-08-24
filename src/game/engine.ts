@@ -660,7 +660,7 @@ export class Engine {
     // settle: logical positions + re-face each other
     P.pos = r.pMove.to;
     E.pos = r.eMove.to;
-    if (!r.pFall && !r.eFall) {
+    if (!r.pFall && !r.eFall && P.pos !== E.pos) {
       const d: 1 | -1 = E.pos > P.pos ? 1 : -1;
       P.facing = d;
       E.facing = d === 1 ? -1 : 1;

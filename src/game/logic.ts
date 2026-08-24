@@ -180,19 +180,39 @@ export function resolveStep(pAct: Action, eAct: Action, pPos: number, ePos: numb
     const swap = opp.kind === my.kind && my.to === oppStart && opp.to === myStart;
     if (swap) return my; // glorious mid-air (or under-legs) swap
     if (opp.kind === my.kind && my.to === opp.to) return move(myStart, myStart + dir, my.kind);
-    if (my.to === opp.to && oppAct !== "back") {
-      // opponent ends where we land -> land one tile short
-      return move(myStart, myStart + dir, my.kind);
-    }
-    if (my.to === opp.to && oppAct === "back") {
-      // opponent stepped back onto our landing tile -> take their old tile
+    if (my.to === opp.to && oppAct === "back" && opp.to !== oppStart) {
+      // opponent genuinely stepped back off their tile -> take their old tile
       return move(myStart, oppStart, my.kind);
+    }
+    if (my.to === opp.to) {
+      // opponent ends where we land (even glued to the edge wall) -> land one tile short
+      return move(myStart, myStart + dir, my.kind);
     }
     return my;
   };
 
   pMv = resolveLeap(pMv, eMv, eAct, pPos, ePos, pDir);
   eMv = resolveLeap(eMv, pMv, pAct, ePos, pPos, eDir);
+
+  // invariant: two grounded fighters may never share a tile
+  const onBoard = (x: number) => x >= 0 && x <= BOARD_SIZE - 1;
+  if (onBoard(pMv.to) && onBoard(eMv.to) && pMv.to === eMv.to) {
+    const stepBack = (mv: MoveInfo, dir: number): MoveInfo =>
+      mv.to !== mv.from ? move(mv.from, clampPos(mv.to - dir), mv.kind) : mv;
+    const pAir = pMv.kind === "leap" || pMv.kind === "roll";
+    const eAir = eMv.kind === "leap" || eMv.kind === "roll";
+    if (pAir && eAir) {
+      pMv = stepBack(pMv, pDir);
+      eMv = stepBack(eMv, eDir);
+    } else if (pAir) {
+      pMv = stepBack(pMv, pDir);
+    } else if (eAir) {
+      eMv = stepBack(eMv, eDir);
+    } else {
+      pMv = move(pPos, pPos, "bump");
+      eMv = move(ePos, ePos, "bump");
+    }
+  }
 
   const isFall = (k: MoveKind) => k === "fall" || k === "knockfall";
   const pFall = isFall(pMv.kind);
