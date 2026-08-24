@@ -3,6 +3,7 @@ import {
   BOARD_SIZE,
   DICE_POOLS,
   ENEMY_START,
+  GAUNTLET_ORDER,
   GameResult,
   MatchStats,
   MAX_HP,
@@ -26,11 +27,14 @@ const TILE_H = 30;
 export const tileCenter = (i: number) => ARENA_X + i * TILE_W + TILE_W / 2;
 
 export interface UiSnapshot {
-  screen: "menu" | "play" | "over" | "lobby";
+  screen: "menu" | "play" | "over" | "lobby" | "g_rest" | "g_done" | "g_over";
   phase: "idle" | "plan" | "thinking" | "resolve" | "ko";
   personality: Personality;
-  mode: "ai" | "net";
+  mode: "ai" | "net" | "gauntlet";
   netPeer: string | null;
+  /** «Путь героя»: индекс следующего врага (0–5), флаг «+1 HP» на привале. */
+  gauntletIndex: number;
+  gauntletHealed: boolean;
   round: number;
   pHp: number;
   eHp: number;
@@ -54,6 +58,8 @@ export const initialUi: UiSnapshot = {
   personality: "aggressor",
   mode: "ai",
   netPeer: null,
+  gauntletIndex: 0,
+  gauntletHealed: false,
   round: 1,
   pHp: MAX_HP,
   eHp: MAX_HP,
@@ -176,8 +182,12 @@ export class Engine {
   private enemyHand: Action[] = [];
   private round = 1;
 
+  private mode: "ai" | "net" | "gauntlet" = "ai";
+  private gauntletIndex = 0;
+  private useGolden = false;
+  private shineTimer = 0;
+
   // ---- сетевой режим ----
-  private mode: "ai" | "net" = "ai";
   private netEnemyPlan: Action[] | null = null;
   private netEnemyHand: Action[] = [];
   private planCommitted = false;
@@ -325,7 +335,18 @@ export class Engine {
     this.eLook = ENEMY_LOOKS.oni;
     this.particles = [];
     this.slow = 1;
-    this.patch({ screen: "menu", phase: "idle", result: null, banner: null, step: -1, netPeer: null, mode: "ai" });
+    this.gauntletIndex = 0;
+    this.patch({
+      screen: "menu",
+      phase: "idle",
+      result: null,
+      banner: null,
+      step: -1,
+      netPeer: null,
+      mode: "ai",
+      gauntletIndex: 0,
+      gauntletHealed: false,
+    });
   }
 
   /** Сетевая дуэль: каждый играет выбранным в лобби бойцом. */
@@ -391,6 +412,55 @@ export class Engine {
       banner: null,
       stats: { ...this.stats },
     });
+  }
+
+  // ---------------- «Путь героя» (gauntlet) ----------------
+
+  /** Начало пути: HP полное, первый враг — Болванчик. */
+  startGauntlet(useGolden: boolean) {
+    this.useGolden = useGolden;
+    this.p.hp = MAX_HP;
+    this.gauntletIndex = 0;
+    this.patch({ gauntletIndex: 0, gauntletHealed: false });
+    this.startGauntletFight();
+  }
+
+  /** Выставить бойца против врага №gauntletIndex (HP сохраняется между боями). */
+  private startGauntletFight() {
+    const tok = ++this.token;
+    const pers = GAUNTLET_ORDER[this.gauntletIndex];
+    this.mode = "gauntlet";
+    this.p = mkFighter(PLAYER_START, 1);
+    this.e = mkFighter(ENEMY_START, -1);
+    this.pLook = this.useGolden ? lookForKind("golden") : PLAYER_LOOK;
+    this.eLook = ENEMY_LOOKS[PERSONALITY_KIND[pers]];
+    this.p.hp = this.ui.pHp; // сохраняем накопленное HP
+    this.particles = [];
+    this.round = 1;
+    this.stats = freshStats();
+    this.slow = 1;
+    this.patch({
+      screen: "play",
+      phase: "idle",
+      mode: "gauntlet",
+      personality: pers,
+      round: 1,
+      pHp: this.p.hp,
+      eHp: MAX_HP,
+      step: -1,
+      enemyRevealed: 0,
+      enemyPlan: [null, null, null],
+      playerPlan: [null, null, null],
+      result: null,
+      stats: { ...this.stats },
+    });
+    this.say(`Путь героя · враг ${this.gauntletIndex + 1}/5: ${PERSONALITIES[pers].name}. Раунд 1!`);
+    this.startExchange(tok);
+  }
+
+  /** Со следующего врага (вызывается из UI после привала). */
+  nextGauntlet() {
+    this.startGauntletFight();
   }
 
   fight(plan: Action[]) {
@@ -891,6 +961,42 @@ export class Engine {
 
   private endMatch(result: GameResult, tok: number) {
     this.stats.exchanges++;
+
+    // ---- «Путь героя»: особый исход ----
+    if (this.mode === "gauntlet") {
+      if (result === "win") {
+        sfx.win();
+        for (let i = 0; i < 40; i++) this.emberBurst(this.p.x, GROUND_Y - 60);
+        // награда: +1 HP, если ещё не полное
+        const healed = this.p.hp < MAX_HP;
+        if (healed) this.p.hp = Math.min(MAX_HP, this.p.hp + 1);
+        const next = this.gauntletIndex + 1;
+        if (next >= GAUNTLET_ORDER.length) {
+          // путь пройден — награда: золотой скин (разблокирует UI)
+          this.patch({ screen: "g_done", result, stats: { ...this.stats }, phase: "ko", pHp: this.p.hp });
+          this.say("Путь пройден! Все пятеро повержены.");
+        } else {
+          this.gauntletIndex = next;
+          this.patch({
+            screen: "g_rest",
+            result,
+            stats: { ...this.stats },
+            phase: "ko",
+            pHp: this.p.hp,
+            gauntletIndex: next,
+            gauntletHealed: healed,
+          });
+          this.say(healed ? "Враг повержен. +1 HP!" : "Враг повержен. HP уже полное.");
+        }
+      } else {
+        sfx.lose();
+        this.patch({ screen: "g_over", result, stats: { ...this.stats }, phase: "ko" });
+        this.say("Путь оборван. Помост ждёт новой попытки.");
+      }
+      void tok;
+      return;
+    }
+
     this.patch({ screen: "over", result, stats: { ...this.stats }, phase: "ko" });
     if (result === "win") {
       sfx.win();
@@ -1108,6 +1214,26 @@ export class Engine {
       pt.y += (pt.vy * dtw) / 1000;
       return true;
     });
+
+    // золотой скин: мерцающие блёстки вокруг ронина
+    if (this.pLook.shine && !this.p.dead) {
+      this.shineTimer += dt;
+      if (this.shineTimer > 90 && this.particles.length < 220) {
+        this.shineTimer = 0;
+        this.particles.push({
+          x: this.p.x + (Math.random() - 0.5) * 44,
+          y: GROUND_Y - this.p.air - Math.random() * 70,
+          vx: (Math.random() - 0.5) * 16,
+          vy: -14 - Math.random() * 20,
+          g: -6,
+          life: 0,
+          max: 620 + Math.random() * 420,
+          size: Math.random() < 0.7 ? 2 : 3,
+          color: Math.random() < 0.55 ? "#ffd98a" : "#fff3c4",
+          kind: "rect",
+        });
+      }
+    }
 
     this.shakeMag = Math.max(0, this.shakeMag - dt / 420);
     this.flashA = Math.max(0, this.flashA - dt / 380);

@@ -3,7 +3,7 @@
 
 export type Pose = "idle" | "walk" | "leap" | "roll" | "strike" | "dodge" | "block" | "hurt" | "ko";
 
-export type FighterKind = "ronin" | "scarecrow" | "oni" | "guard" | "kitsune" | "shinobi";
+export type FighterKind = "ronin" | "golden" | "scarecrow" | "oni" | "guard" | "kitsune" | "shinobi";
 
 export interface Look {
   kind: FighterKind;
@@ -25,6 +25,8 @@ export interface Look {
   hair: string;
   gear: string;
   gearSh: string;
+  /** Золотой скин: вокруг бойца мерцают блёстки. */
+  shine?: boolean;
 }
 
 export const PLAYER_LOOK: Look = {
@@ -74,10 +76,36 @@ export const RIVAL_RONIN_LOOK: Look = {
 
 /** Палитра бойца по его виду (для лобби и сетевой игры). */
 export function lookForKind(kind: FighterKind): Look {
-  return kind === "ronin" ? PLAYER_LOOK : ENEMY_LOOKS[kind];
+  if (kind === "ronin") return PLAYER_LOOK;
+  if (kind === "golden") return GOLDEN_RONIN_LOOK;
+  return ENEMY_LOOKS[kind];
 }
 
-export const ENEMY_LOOKS: Record<Exclude<FighterKind, "ronin">, Look> = {
+/** Награда за «Путь героя»: золотой блестящий ронин. */
+export const GOLDEN_RONIN_LOOK: Look = {
+  kind: "golden",
+  outline: "#241a05",
+  skin: "#ffe3bd",
+  skinSh: "#e8b98a",
+  main: "#e9c46a", // золотое кимоно
+  mainSh: "#c19a3d",
+  mainHi: "#ffd98a",
+  accent: "#c1121f", // алый пояс — контраст
+  leg: "#4a3a1a",
+  legSh: "#3a2c10",
+  boot: "#2a1f0a",
+  blade: "#fff3c4", // сияющая сталь
+  bladeSh: "#e9c46a",
+  bladeHi: "#ffffff",
+  guard: "#8a6d1f",
+  eye: "#1a1a1a",
+  hair: "#c1121f", // алый шарф
+  gear: "#f2eeda", // белёсая шляпа
+  gearSh: "#d4c9a0",
+  shine: true,
+};
+
+export const ENEMY_LOOKS: Record<Exclude<FighterKind, "ronin" | "golden">, Look> = {
   scarecrow: {
     kind: "scarecrow",
     outline: "#1a1a1a",

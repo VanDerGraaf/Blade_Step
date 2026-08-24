@@ -6,6 +6,7 @@ import {
   ACTION_META,
   DICE_POOLS,
   GameResult,
+  GAUNTLET_ORDER,
   MatchStats,
   PERSONALITIES,
   PERSONALITY_KIND,
@@ -25,6 +26,7 @@ const FIGHTER_OPTIONS: { kind: FighterKind; name: string; color: string }[] = [
   { kind: "guard", name: "СТРАЖ", color: "#aebbdd" },
   { kind: "kitsune", name: "ЗЕРКАЛО", color: "#b57ff0" },
   { kind: "shinobi", name: "ШИНОБИ", color: "#7ee081" },
+  { kind: "golden", name: "ЗОЛОТОЙ", color: "#e9c46a" },
 ];
 import {
   ActionIcon,
@@ -36,6 +38,7 @@ import {
   IconRetry,
   IconSkull,
   IconSound,
+  IconStar,
 } from "./components/Icons";
 
 /** "any" = random opponent each battle. */
@@ -255,11 +258,19 @@ function MenuScreen({
   pers,
   setPers,
   onStart,
+  onGauntlet,
+  goldenUnlocked,
+  goldenEquip,
+  onToggleGolden,
   netPanel,
 }: {
   pers: MenuChoice;
   setPers: (p: MenuChoice) => void;
   onStart: () => void;
+  onGauntlet: () => void;
+  goldenUnlocked: boolean;
+  goldenEquip: boolean;
+  onToggleGolden: () => void;
   netPanel: NetPanelProps;
 }) {
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -357,6 +368,43 @@ function MenuScreen({
             >
               К БОЮ
             </button>
+
+            {/* ---- путь героя ---- */}
+            <div className="mt-2.5 border-2 border-[#070919] bg-ink2 p-2.5" style={{ boxShadow: "inset 0 0 0 1px #8a6d1f" }}>
+              <p className="font-pixel text-[9px] text-[#e9c46a] mb-1 flex items-center gap-1.5">
+                <IconStar className="w-3.5 h-3.5" /> ПУТЬ ГЕРОЯ
+              </p>
+              <p className="font-body text-[10px] text-dim leading-snug mb-2">
+                Пятеро врагов подряд — от Болванчика до Шиноби. HP копится: за каждую победу{" "}
+                <span className="text-[#e9c46a]">+1 HP</span>. Пройдёшь всех — получишь{" "}
+                <span className="text-[#e9c46a]">золотой скин</span>.
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={onGauntlet}
+                  disabled={netPanel.state !== "off"}
+                  className="px-btn no-select flex-1 py-2 bg-[#8a6d1f] text-[#070919] text-[11px] tracking-wider"
+                >
+                  В ПУТЬ
+                </button>
+                {goldenUnlocked && (
+                  <button
+                    onClick={onToggleGolden}
+                    title="Играть золотым ронином в соло-режимах"
+                    className={`px-btn no-select px-2.5 py-2 text-[9px] ${
+                      goldenEquip ? "bg-[#e9c46a] text-[#070919]" : "bg-panel text-dim"
+                    }`}
+                  >
+                    {goldenEquip ? "ЗОЛОТОЙ ✓" : "ОБЫЧНЫЙ"}
+                  </button>
+                )}
+              </div>
+              {!goldenUnlocked && (
+                <p className="font-body text-[9px] text-dim/70 mt-1.5 leading-tight">
+                  Награда ещё не открыта — пройди путь до конца.
+                </p>
+              )}
+            </div>
 
             {/* ---- сетевая дуэль ---- */}
             <div className="mt-3 pt-2.5 border-t-2 border-dashed border-[#39406e]">
@@ -707,6 +755,151 @@ function OverScreen({
   );
 }
 
+// ---------------------------------------------------------------- gauntlet screens
+
+function GauntletProgress({ index }: { index: number }) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 mb-4">
+      {GAUNTLET_ORDER.map((p, i) => {
+        const meta = PERSONALITIES[p];
+        const done = i < index;
+        const cur = i === index;
+        return (
+          <div key={p} className="flex items-center gap-1.5">
+            <div
+              className={`w-8 h-8 flex items-center justify-center border-2 border-[#070919] ${
+                done ? "opacity-40" : cur ? "anim-active-step" : "opacity-70"
+              }`}
+              style={{ background: done ? "#1c2244" : meta.color + "33", color: meta.color }}
+              title={meta.name}
+            >
+              {done ? <span className="font-pixel text-[10px]">✕</span> : <IconSkull className="w-4 h-4" />}
+            </div>
+            {i < GAUNTLET_ORDER.length - 1 && <span className="font-pixel text-[8px] text-[#39406e]">—</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GauntletRest({
+  index,
+  healed,
+  pHp,
+  onNext,
+}: {
+  index: number;
+  healed: boolean;
+  pHp: number;
+  onNext: () => void;
+}) {
+  const next = PERSONALITIES[GAUNTLET_ORDER[index]];
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/80 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise">
+          <p className="font-pixel text-[9px] text-dim text-center mb-1">ПРИВАЛ</p>
+          <h2 className="font-pixel text-center text-[22px] md:text-[28px] text-[#e9c46a] leading-none mb-3" style={{ textShadow: "3px 3px 0 #070919" }}>
+            ВРАГ ПОВЕРЖЕН
+          </h2>
+          <p className="font-pixel text-center text-[11px] mb-1" style={{ color: healed ? "#2a9d8f" : "#8f96c4" }}>
+            {healed ? "+1 HP" : "HP УЖЕ ПОЛНОЕ"}
+          </p>
+          <div className="flex justify-center mb-4">
+            <Pips hp={pHp} />
+          </div>
+          <GauntletProgress index={index} />
+          <div className="px-panel p-3 bg-panel text-center mb-4">
+            <p className="font-body text-[11px] text-dim mb-2">Следующий противник:</p>
+            <div className="flex items-center justify-center gap-3">
+              <FighterPreview kind={PERSONALITY_KIND[GAUNTLET_ORDER[index]]} size={56} />
+              <div className="text-left">
+                <p className="font-pixel text-[12px]" style={{ color: next.color }}>{next.name}</p>
+                <p className="font-body text-[10px] text-dim mt-0.5">{next.title}</p>
+              </div>
+            </div>
+          </div>
+          <button onClick={onNext} className="px-btn no-select w-full py-3 bg-[#e9c46a] text-[#070919] text-[12px] tracking-wider">
+            СЛЕДУЮЩИЙ ВРАГ →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GauntletDone({ onMenu, onAgain }: { onMenu: () => void; onAgain: () => void }) {
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise text-center">
+          <p className="font-pixel text-[9px] text-dim mb-2">ПУТЬ ГЕРОЯ</p>
+          <h2 className="anim-slam font-pixel text-[26px] md:text-[34px] text-[#e9c46a] leading-none mb-1" style={{ textShadow: "4px 4px 0 #070919" }}>
+            ПУТЬ ПРОЙДЕН
+          </h2>
+          <p className="font-body text-[12px] text-dim mb-4">Все пятеро повержены. Помост склоняется перед тобой.</p>
+          <div className="flex justify-center mb-3">
+            <FighterPreview kind="golden" size={96} />
+          </div>
+          <p className="font-pixel text-[11px] text-[#e9c46a] mb-1 anim-blink">ЗОЛОТОЙ СКИН ОТКРЫТ!</p>
+          <p className="font-body text-[10px] text-dim mb-4">Теперь ты можешь играть золотым ронином — и в соло, и в сети.</p>
+          <div className="flex gap-2">
+            <button onClick={onAgain} className="px-btn no-select flex-1 py-3 bg-[#8a6d1f] text-[#070919] text-[11px]">
+              ЕЩЁ РАЗ
+            </button>
+            <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[11px]">
+              В МЕНЮ
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GauntletOver({
+  index,
+  stats,
+  onRetry,
+  onMenu,
+}: {
+  index: number;
+  stats: MatchStats;
+  onRetry: () => void;
+  onMenu: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/80 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise">
+          <h2 className="anim-slam font-pixel text-center text-[26px] md:text-[32px] text-blood leading-none mb-1" style={{ textShadow: "4px 4px 0 #070919" }}>
+            ПУТЬ ОБОРВАН
+          </h2>
+          <p className="font-body text-[12px] text-dim text-center mb-3">
+            Ты пал на враге <span className="text-paper font-pixel">{index + 1}</span> из 5. Помост ждёт новой попытки.
+          </p>
+          <GauntletProgress index={index} />
+          <div className="grid grid-cols-4 gap-1.5 mb-4">
+            <StatCell v={index} label="пройдено" color="#e9c46a" />
+            <StatCell v={stats.dealt} label="урон" color="#ffc24b" />
+            <StatCell v={stats.taken} label="получено" color="#ff4757" />
+            <StatCell v={stats.exchanges} label="обмены" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onRetry} className="px-btn no-select flex-1 py-3 bg-blood text-paper text-[12px]">
+              ЗАНОВО
+            </button>
+            <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px]">
+              В МЕНЮ
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- app
 
 function PreviewSlot({ kind, label, color }: { kind: FighterKind | null; label: string; color: string }) {
@@ -730,17 +923,20 @@ function LobbyScreen({
   myKind,
   peerKind,
   peerName,
+  goldenUnlocked,
   onPick,
   onStart,
 }: {
   myKind: FighterKind | null;
   peerKind: FighterKind | null;
   peerName: string;
+  goldenUnlocked: boolean;
   onPick: (k: FighterKind) => void;
   onStart: () => void;
 }) {
   const isHost = net.isHost;
   const canStart = !!myKind && !!peerKind && myKind !== peerKind;
+  const options = goldenUnlocked ? FIGHTER_OPTIONS : FIGHTER_OPTIONS.filter((o) => o.kind !== "golden");
   return (
     <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
       <div className="min-h-full flex items-center justify-center p-4">
@@ -790,7 +986,9 @@ function LobbyScreen({
                   <span className="font-pixel text-[7px] leading-none" style={{ color: o.color }}>
                     {o.name}
                   </span>
-                  <span className="font-body text-[8px] text-dim leading-none">{DICE_POOLS[o.kind].length} куб.</span>
+                  <span className="font-body text-[8px] text-dim leading-none">
+                    {DICE_POOLS[o.kind === "golden" ? "ronin" : o.kind].length} куб.
+                  </span>
                 </button>
               );
             })}
@@ -859,6 +1057,13 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(20);
   const [oppWantsRematch, setOppWantsRematch] = useState(false);
   const [rematchSent, setRematchSent] = useState(false);
+  // золотой скин (награда за «Путь героя»)
+  const [goldenUnlocked, setGoldenUnlocked] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("bs-golden-unlocked") === "1"
+  );
+  const [goldenEquip, setGoldenEquip] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("bs-golden-equip") === "1"
+  );
   // лобби выбора бойца
   const [myKind, setMyKind] = useState<FighterKind | null>(null);
   const [peerKind, setPeerKind] = useState<FighterKind | null>(null);
@@ -1112,6 +1317,57 @@ export default function App() {
     const choice = pers === "any" ? all[Math.floor(Math.random() * all.length)] : pers;
     engine.startMatch(choice);
   }, [engine, pers, netState]);
+
+  // ---- «Путь героя» ----
+  const startGauntlet = useCallback(() => {
+    if (netState === "connected" || netState === "hosting" || netState === "joining") return;
+    initAudio();
+    sfx.fight();
+    setPaused(false);
+    engine.paused = false;
+    setSlots([null, null, null]);
+    engine.startGauntlet(goldenUnlocked && goldenEquip);
+  }, [engine, netState, goldenUnlocked, goldenEquip]);
+
+  const continueGauntlet = useCallback(() => {
+    initAudio();
+    sfx.select();
+    engine.nextGauntlet();
+  }, [engine]);
+
+  /** Разблокировать золотой скин (один раз, навсегда). */
+  const unlockGolden = useCallback(() => {
+    setGoldenUnlocked(true);
+    setGoldenEquip(true);
+    try {
+      localStorage.setItem("bs-golden-unlocked", "1");
+      localStorage.setItem("bs-golden-equip", "1");
+    } catch { /* noop */ }
+  }, []);
+
+  /** Переключить экипировку золотого скина в соло-режимах. */
+  const toggleGoldenEquip = useCallback(() => {
+    initAudio();
+    sfx.tick();
+    setGoldenEquip((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("bs-golden-equip", nv ? "1" : "0");
+      } catch { /* noop */ }
+      return nv;
+    });
+  }, []);
+
+  // путь пройден — разблокировать золотой скин (со звуком)
+  useEffect(() => {
+    if (ui.screen === "g_done" && !goldenUnlocked) {
+      const t = window.setTimeout(() => {
+        sfx.unlock();
+        unlockGolden();
+      }, 450);
+      return () => window.clearTimeout(t);
+    }
+  }, [ui.screen, goldenUnlocked, unlockGolden]);
 
   // ---- сетевые действия из меню ----
   /** Хост режима «по коду» (чистый WebRTC). */
@@ -1604,6 +1860,10 @@ export default function App() {
           pers={pers}
           setPers={setPers}
           onStart={startMatch}
+          onGauntlet={startGauntlet}
+          goldenUnlocked={goldenUnlocked}
+          goldenEquip={goldenEquip}
+          onToggleGolden={toggleGoldenEquip}
           netPanel={{
             state: netState,
             ip: ipAddr,
@@ -1654,6 +1914,15 @@ export default function App() {
               : "РЕВАНШ"
           }
         />
+      )}
+
+      {/* ---- «Путь героя» ---- */}
+      {ui.screen === "g_rest" && (
+        <GauntletRest index={ui.gauntletIndex} healed={ui.gauntletHealed} pHp={ui.pHp} onNext={continueGauntlet} />
+      )}
+      {ui.screen === "g_done" && <GauntletDone onMenu={quitToMenu} onAgain={startGauntlet} />}
+      {ui.screen === "g_over" && (
+        <GauntletOver index={ui.gauntletIndex} stats={ui.stats} onRetry={startGauntlet} onMenu={quitToMenu} />
       )}
 
       {/* лобби выбора бойца (сетевая игра) */}

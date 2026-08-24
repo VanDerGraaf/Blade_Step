@@ -149,6 +149,9 @@ export const PERSONALITY_KIND: Record<Personality, EnemyKind> = {
 
 export const ENEMY_KINDS: EnemyKind[] = ["scarecrow", "oni", "guard", "kitsune", "shinobi"];
 
+/** «Путь героя»: враги по порядку, от лёгкого к смертельному. */
+export const GAUNTLET_ORDER: Personality[] = ["random", "aggressor", "controller", "mirror", "shadow"];
+
 export interface PersonalityMeta {
   name: string;
   title: string;

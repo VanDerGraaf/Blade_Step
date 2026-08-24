@@ -90,6 +90,17 @@ export const sfx = {
     tone({ f0: 1320, f1: 1980, dur: 0.16, vol: 0.1, type: "triangle" });
     tone({ f0: 880, f1: 660, dur: 0.22, vol: 0.08, type: "sine" });
   },
+  /** Восстановление HP на привале «Пути героя». */
+  heal: () => {
+    tone({ f0: 523, f1: 659, dur: 0.12, vol: 0.12, type: "triangle" });
+    tone({ f0: 659, f1: 784, dur: 0.16, vol: 0.12, type: "triangle", delay: 0.09 });
+  },
+  /** Разблокировка золотого скина — восходящее арпеджио. */
+  unlock: () => {
+    const seq = [523, 659, 784, 1047, 1319];
+    seq.forEach((f, i) => tone({ f0: f, f1: f, dur: 0.14, vol: 0.12, type: "square", delay: i * 0.09 }));
+    tone({ f0: 1568, f1: 2093, dur: 0.4, vol: 0.1, type: "triangle", delay: seq.length * 0.09 });
+  },
   slot: () => {
     tone({ f0: 300, f1: 180, dur: 0.08, vol: 0.16, type: "triangle" });
     noise({ dur: 0.05, vol: 0.08, f0: 2400 });

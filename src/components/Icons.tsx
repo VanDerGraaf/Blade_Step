@@ -274,6 +274,26 @@ const MUSIC_ROWS = [
 ];
 export const IconMusic = ({ className }: { className?: string }) => <Px rows={MUSIC_ROWS} className={className} />;
 
+const STAR_ROWS = [
+  "................",
+  ".......##.......",
+  ".......##.......",
+  "......####......",
+  "......####......",
+  "....########....",
+  "...##########...",
+  "....########....",
+  "......####......",
+  ".....##..##.....",
+  "....##....##....",
+  "...##......##...",
+  "...#........#...",
+  "................",
+  "................",
+  "................",
+];
+export const IconStar = ({ className }: { className?: string }) => <Px rows={STAR_ROWS} className={className} />;
+
 const WAIT_ROWS = [
   "................",
   "................",
