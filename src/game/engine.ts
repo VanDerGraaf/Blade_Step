@@ -166,6 +166,9 @@ export class Engine {
   private shakeMag = 0;
   private flashA = 0;
   private slow = 1;
+  private dprBase = 1;
+  private uiScale = 1;
+  private effDpr = 1;
 
   private pPlan: Action[] = [];
   private ePlan: Action[] = [];
@@ -202,9 +205,8 @@ export class Engine {
   // ---------------- lifecycle ----------------
   attach(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = VIEW_W * dpr;
-    canvas.height = VIEW_H * dpr;
+    this.dprBase = Math.min(2, window.devicePixelRatio || 1);
+    this.applyBacking();
     this.ctx = canvas.getContext("2d");
     try {
       document.fonts?.load('16px "Press Start 2P"').catch(() => {});
@@ -215,9 +217,24 @@ export class Engine {
       const dt = Math.min(50, now - this.last);
       this.last = now;
       if (!this.paused) this.update(dt);
-      this.render(dpr);
+      this.render();
     };
     this.raf = requestAnimationFrame(loop);
+  }
+
+  /** Масштаб UI (fit-to-window): канвас получает пропорционально больший буфер, чтобы оставаться чётким. */
+  setRenderScale(scale: number) {
+    const s = Math.min(2, Math.max(0.75, scale));
+    if (Math.abs(s - this.uiScale) < 0.01) return;
+    this.uiScale = s;
+    this.applyBacking();
+  }
+
+  private applyBacking() {
+    if (!this.canvas) return;
+    this.effDpr = this.dprBase * this.uiScale;
+    this.canvas.width = Math.round(VIEW_W * this.effDpr);
+    this.canvas.height = Math.round(VIEW_H * this.effDpr);
   }
 
   detach() {
@@ -1067,10 +1084,10 @@ export class Engine {
   }
 
   // ---------------- render ----------------
-  private render(dpr: number) {
+  private render() {
     const ctx = this.ctx;
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(this.effDpr, 0, 0, this.effDpr, 0, 0);
     const sh = this.shakeMag * this.shakeMag * 13;
     const ox = (Math.random() - 0.5) * 2 * sh;
     const oy = (Math.random() - 0.5) * 2 * sh;

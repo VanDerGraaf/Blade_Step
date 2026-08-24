@@ -842,6 +842,20 @@ export default function App() {
   uiRef.current = ui;
   const slotsRef = useRef(slots);
   slotsRef.current = slots;
+
+  // ---- fit-to-window: весь интерфейс масштабируется под окно (2K/4K и мелкие окна) ----
+  const [fit, setFit] = useState(1);
+  useEffect(() => {
+    const compute = () => {
+      const s = Math.min(window.innerWidth / 1280, window.innerHeight / 800);
+      setFit(Math.min(3, Math.max(0.7, s)));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  const zoomOk =
+    typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("zoom", "1");
   const myKindRef = useRef<FighterKind | null>(null);
   myKindRef.current = myKind;
   const peerKindRef = useRef<FighterKind | null>(null);
@@ -913,6 +927,11 @@ export default function App() {
       net.teardown();
     };
   }, [engine]);
+
+  // держим внутренний буфер канваса в соответствии с fit-масштабом окна
+  useEffect(() => {
+    engine.setRenderScale(fit);
+  }, [engine, fit]);
 
   // сетевые события: подключение, сообщения, разрыв
   useEffect(() => {
@@ -1234,7 +1253,19 @@ export default function App() {
   };
 
   return (
-    <div className="h-full flex flex-col arena-bg scanlines relative overflow-hidden">
+    <div
+      className="flex flex-col arena-bg scanlines relative overflow-hidden"
+      style={
+        zoomOk
+          ? { zoom: fit, width: `${100 / fit}vw`, height: `${100 / fit}vh` }
+          : {
+              transform: `scale(${fit})`,
+              transformOrigin: "top left",
+              width: `${100 / fit}vw`,
+              height: `${100 / fit}vh`,
+            }
+      }
+    >
       {/* ---------- top HUD ---------- */}
       <header className="relative z-20 flex items-center justify-between gap-2 px-2 sm:px-4 md:px-6 py-1.5 md:py-2 border-b-[3px] border-[#070919] bg-[#151a33]/95">
         <div className="flex items-center gap-2 min-w-0">
@@ -1287,7 +1318,7 @@ export default function App() {
           className="relative max-w-[1080px] px-panel p-1 sm:p-1.5 bg-[#0a0d1d]"
           style={{ width: "min(100%, calc((100dvh - 310px) * 1.7778), 1080px)" }}
         >
-          <canvas ref={canvasRef} className="block w-full h-auto" />
+          <canvas ref={canvasRef} className="block w-full h-auto [image-rendering:pixelated]" />
           {ui.banner && (
             <div key={ui.bannerId} className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <span
