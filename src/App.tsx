@@ -1,0 +1,1948 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Engine, initialUi, UiSnapshot } from "./game/engine";
+import {
+  Action,
+  ACTIONS,
+  ACTION_META,
+  DICE_POOLS,
+  GameResult,
+  GAUNTLET_ORDER,
+  MatchStats,
+  PERSONALITIES,
+  PERSONALITY_KIND,
+  Personality,
+  SPECIAL_ACTIONS,
+} from "./game/types";
+import { initAudio, isMuted, isMusicOn, setMuted, setMusicOn, sfx } from "./game/audio";
+import { HAS_WEBRTC, net, NetMsg, Transport } from "./game/net";
+import { FighterPreview } from "./components/FighterPreview";
+import type { FighterKind } from "./game/sprites";
+
+/** Бойцы, доступные для выбора в сетевом лобби. */
+const FIGHTER_OPTIONS: { kind: FighterKind; name: string; color: string }[] = [
+  { kind: "ronin", name: "РОНИН", color: "#2a9d8f" },
+  { kind: "scarecrow", name: "БОЛВАНЧИК", color: "#c9a96e" },
+  { kind: "oni", name: "КРОВОЖАД", color: "#e63946" },
+  { kind: "guard", name: "СТРАЖ", color: "#aebbdd" },
+  { kind: "kitsune", name: "ЗЕРКАЛО", color: "#b57ff0" },
+  { kind: "shinobi", name: "ШИНОБИ", color: "#7ee081" },
+  { kind: "golden", name: "ЗОЛОТОЙ", color: "#e9c46a" },
+];
+import {
+  ActionIcon,
+  IconHeart,
+  IconHome,
+  IconMusic,
+  IconMute,
+  IconPause,
+  IconRetry,
+  IconSkull,
+  IconSound,
+  IconStar,
+} from "./components/Icons";
+
+/** "any" = random opponent each battle. */
+type MenuChoice = Personality | "any";
+
+// ---------------------------------------------------------------- dice
+
+function HandDie({
+  action,
+  badge,
+  dimmed,
+  onClick,
+  disabled,
+  enemy,
+  delay = 0,
+  roll = true,
+  hotkey,
+}: {
+  action: Action;
+  badge?: number | null;
+  dimmed?: boolean;
+  onClick?: () => void;
+  disabled?: boolean;
+  enemy?: boolean;
+  delay?: number;
+  roll?: boolean;
+  hotkey?: number;
+}) {
+  const m = ACTION_META[action];
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || !onClick}
+      className={`die no-select relative flex flex-col items-center justify-center gap-0.5 w-10 h-12 sm:w-11 sm:h-[52px] ${
+        roll ? "anim-dice-roll" : ""
+      } ${onClick ? "die-clickable" : ""} ${dimmed ? "opacity-35 saturate-50" : ""} ${
+        badge ? "die-chosen" : ""
+      }`}
+      style={{ background: m.dark, animationDelay: roll ? `${delay}ms` : undefined }}
+      aria-label={m.name}
+    >
+      {hotkey !== undefined && (
+        <span className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 bg-[#070919] text-dim font-pixel flex items-center justify-center border border-[#39406e]"
+          style={{ fontSize: 6 }}
+        >
+          {hotkey}
+        </span>
+      )}
+      <ActionIcon action={action} className="w-5 h-5 sm:w-6 sm:h-6" />
+      <span className="font-pixel leading-none" style={{ color: m.color, fontSize: 5 }}>
+        {m.short}
+      </span>
+      {badge ? (
+        <span
+          className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gold text-[#070919] font-pixel flex items-center justify-center border border-[#070919]"
+          style={{ fontSize: 7 }}
+        >
+          {badge}
+        </span>
+      ) : null}
+      {enemy && <span className="absolute inset-0 border-2 border-[#070919]/50 pointer-events-none" />}
+      <span className="absolute inset-x-0 bottom-0 h-0.5" style={{ background: m.color, opacity: 0.85 }} />
+    </button>
+  );
+}
+
+function FlipDie({
+  action,
+  revealed,
+  active,
+  done,
+  big,
+  backColor = "#232b4d",
+}: {
+  action: Action | null;
+  revealed: boolean; // true = action face is up, false = hidden "?" face is up
+  active?: boolean;
+  done?: boolean;
+  big?: boolean;
+  backColor?: string;
+}) {
+  const m = action ? ACTION_META[action] : null;
+  return (
+    <div
+      className={`die-flip ${big ? "w-14 h-[68px] sm:w-[76px] sm:h-[92px]" : "w-[52px] h-16 sm:w-16 sm:h-[78px]"} ${
+        done ? "opacity-35 saturate-50" : ""
+      } ${active ? "anim-active-step" : ""}`}
+    >
+      <div className={`die-flip-inner ${revealed ? "" : "flipped"}`}>
+        <div className="die-face die flex flex-col items-center justify-center gap-1" style={{ background: m ? m.dark : "#1c2244" }}>
+          {m && action && (
+            <>
+              <ActionIcon action={action} className={big ? "w-8 h-8 sm:w-10 sm:h-10" : "w-7 h-7 sm:w-8 sm:h-8"} />
+              <span className="font-pixel leading-none" style={{ color: m.color, fontSize: big ? 7 : 6 }}>
+                {m.short}
+              </span>
+            </>
+          )}
+        </div>
+        <div className="die-face back die flex items-center justify-center" style={{ background: backColor }}>
+          <span className="font-pixel text-blood opacity-80" style={{ fontSize: 14 }}>
+            ?
+          </span>
+          <span className="absolute inset-1 border-2 border-dashed border-[#39406e] pointer-events-none" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- HUD bits
+
+function Pips({ hp, right }: { hp: number; right?: boolean }) {
+  return (
+    <div className={`flex gap-1 ${right ? "flex-row-reverse" : ""}`}>
+      {[0, 1, 2].map((i) => (
+        <span key={`${i}-${i < hp}`} className={`inline-block ${i < hp ? "text-blood" : "text-[#39406e]"} ${i === hp && hp > 0 ? "anim-pip" : ""}`}>
+          <IconHeart className="w-4 h-4 md:w-5 md:h-5" />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const PHASE_LABEL: Record<UiSnapshot["phase"], string> = {
+  idle: "—",
+  plan: "ПЛАН БОЯ",
+  thinking: "ВРАГ ЗАМЫШЛЯЕТ",
+  resolve: "РАЗРЕШЕНИЕ",
+  ko: "ФИНАЛ",
+};
+
+// ---------------------------------------------------------------- screens
+
+function CodexEntry({ a, enemy }: { a: Action; enemy?: boolean }) {
+  const m = ACTION_META[a];
+  return (
+    <div
+      className={`flex items-start gap-2 px-panel px-2 py-1.5 bg-ink2/80 ${enemy ? "border-l-4 border-blood" : ""}`}
+    >
+      <span
+        className="shrink-0 mt-0.5 w-7 h-7 flex items-center justify-center border-2 border-[#070919]"
+        style={{ background: m.dark, color: m.color }}
+      >
+        <ActionIcon action={a} className="w-4 h-4" />
+      </span>
+      <span className="min-w-0">
+        <span className="block font-pixel leading-tight" style={{ color: m.color, fontSize: 8 }}>
+          {m.name.toUpperCase()}
+          {enemy && <span className="text-blood ml-1.5" style={{ fontSize: 6 }}>ВРАГ</span>}
+        </span>
+        <span className="block font-body text-[11px] leading-tight text-dim">{m.desc}</span>
+      </span>
+    </div>
+  );
+}
+
+function Codex() {
+  return (
+    <div>
+      <p className="font-pixel text-[9px] md:text-[10px] text-steel mb-2 tracking-wider">КОДЕКС КЛИНКА</p>
+      <div className="grid sm:grid-cols-2 gap-1.5">
+        {ACTIONS.map((a) => (
+          <CodexEntry key={a} a={a} />
+        ))}
+      </div>
+      <p className="font-pixel text-[8px] md:text-[9px] text-blood mt-2.5 mb-1.5 tracking-wider">ОСОБЫЕ ГРАНИ ВРАГОВ</p>
+      <div className="grid sm:grid-cols-2 gap-1.5">
+        {SPECIAL_ACTIONS.map((a) => (
+          <CodexEntry key={a} a={a} enemy />
+        ))}
+      </div>
+      <p className="font-pixel text-[7px] md:text-[8px] text-dim mt-2 leading-relaxed">
+        3 HP · КРИТ ПО ПРЫГУНУ = 2 УРОНА · УДАР ДОСТАЁТ С ДИСТАНЦИИ 1 · ЗА КРАЕМ ПОМОСТА — ПРОПАСТЬ
+      </p>
+    </div>
+  );
+}
+
+function ThreatSkulls({ n, color }: { n: number; color: string }) {
+  return (
+    <div className="flex gap-0.5" style={{ color }}>
+      {[1, 2, 3, 4].map((i) => (
+        <IconSkull key={i} className={`w-4 h-4 ${i <= n ? "" : "opacity-20"}`} />
+      ))}
+    </div>
+  );
+}
+
+interface NetPanelProps {
+  state: "off" | "hosting" | "joining" | "connected";
+  ip: string; // lan: server address
+  setIp: (v: string) => void;
+  error: string;
+  transport: Transport;
+  setTransport: (t: Transport) => void;
+  onCreate: () => void; // host, online transport
+  onConnectLan: () => void; // both roles, lan transport
+  onCancel: () => void;
+  // pure WebRTC (online transport)
+  invite: string;
+  answer: string;
+  inviteInput: string;
+  setInviteInput: (v: string) => void;
+  answerInput: string;
+  setAnswerInput: (v: string) => void;
+  onGuestStart: () => void;
+  onAcceptAnswer: () => void;
+  onMakeAnswer: () => void;
+  copied: string | null;
+  onCopy: (text: string, key: string) => void;
+}
+
+
+
+function MenuScreen({
+  pers,
+  setPers,
+  onStart,
+  onGauntlet,
+  goldenUnlocked,
+  goldenEquip,
+  onToggleGolden,
+  netPanel,
+}: {
+  pers: MenuChoice;
+  setPers: (p: MenuChoice) => void;
+  onStart: () => void;
+  onGauntlet: () => void;
+  goldenUnlocked: boolean;
+  goldenEquip: boolean;
+  onToggleGolden: () => void;
+  netPanel: NetPanelProps;
+}) {
+  const [rulesOpen, setRulesOpen] = useState(false);
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-3 md:p-6">
+        <div className="w-full max-w-sm md:max-w-md anim-rise">
+          {/* title strip */}
+          <div className="flex items-end justify-between gap-2 mb-2 select-none">
+            <h1 className="font-pixel leading-none whitespace-nowrap">
+              <span className="text-[24px] md:text-[30px] text-gold drop-shadow-[3px_3px_0_#070919]">BLADE</span>{" "}
+              <span className="text-[24px] md:text-[30px] text-blood drop-shadow-[3px_3px_0_#070919]">STEP</span>
+            </h1>
+            <span className="font-pixel text-[6px] md:text-[7px] text-blade pb-1 text-right leading-relaxed">
+              одновременная дуэль<br />6 клеток · 3 HP
+            </span>
+          </div>
+
+          {/* fight select */}
+          <div className="px-panel p-2.5 md:p-3 bg-panel">
+            <p className="font-pixel text-[9px] text-paper mb-2 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-blood inline-block anim-blink" />
+              ВЫБЕРИ СОПЕРНИКА
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {(Object.keys(PERSONALITIES) as Personality[]).map((p) => {
+                const m = PERSONALITIES[p];
+                const sel = pers === p;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => {
+                      initAudio();
+                      sfx.select();
+                      setPers(p);
+                    }}
+                    className={`no-select text-left border-[3px] border-[#070919] px-2.5 py-1.5 transition-all duration-100 ${
+                      sel ? "translate-x-1 bg-ink" : "bg-ink2 hover:bg-ink hover:translate-x-0.5"
+                    }`}
+                    style={sel ? { boxShadow: `inset 0 0 0 2px ${m.color}, 0 0 14px ${m.color}44` } : undefined}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="font-pixel text-[10px] md:text-[11px]" style={{ color: m.color }}>
+                        {m.name}
+                      </span>
+                      <ThreatSkulls n={m.threat} color={m.color} />
+                    </span>
+                    <span className="block font-body text-[10px] text-dim mt-0.5 leading-tight">
+                      {m.title} · <span className="italic opacity-80">{m.quote}</span>
+                    </span>
+                    <span className="mt-1 flex items-center gap-0.5" title="Набор кубиков противника">
+                      {DICE_POOLS[PERSONALITY_KIND[p]].map((a, i) => (
+                        <span
+                          key={i}
+                          className="w-[18px] h-[18px] border border-[#070919] flex items-center justify-center"
+                          style={{ background: ACTION_META[a].dark, color: ACTION_META[a].color }}
+                        >
+                          <ActionIcon action={a} className="w-2.5 h-2.5" />
+                        </span>
+                      ))}
+                    </span>
+                  </button>
+                );
+              })}
+
+              {/* random opponent */}
+              <button
+                onClick={() => {
+                  initAudio();
+                  sfx.select();
+                  setPers("any");
+                }}
+                className={`no-select text-left border-[3px] border-[#070919] px-2.5 py-1.5 transition-all duration-100 ${
+                  pers === "any" ? "translate-x-1 bg-ink" : "bg-ink2 hover:bg-ink hover:translate-x-0.5"
+                }`}
+                style={
+                  pers === "any"
+                    ? { boxShadow: "inset 0 0 0 2px #3ddad7, 0 0 14px rgba(61,218,215,0.3)" }
+                    : undefined
+                }
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-pixel text-[10px] md:text-[11px] text-[#3ddad7]">СЛУЧАЙ</span>
+                  <span className="font-pixel text-[12px] text-[#3ddad7] anim-blink">?</span>
+                </span>
+                <span className="block font-body text-[10px] text-dim mt-0.5 leading-tight">
+                  Испытание судьбы · <span className="italic opacity-80">«Кого пришлёт помост — того и встретишь»</span>
+                </span>
+              </button>
+            </div>
+            <button
+              onClick={onStart}
+              disabled={netPanel.state !== "off"}
+              className="px-btn no-select w-full mt-2.5 py-2.5 md:py-3 bg-blood text-paper text-[12px] md:text-[13px] tracking-widest"
+            >
+              К БОЮ
+            </button>
+
+            {/* ---- путь героя ---- */}
+            <div className="mt-2.5 border-2 border-[#070919] bg-ink2 p-2.5" style={{ boxShadow: "inset 0 0 0 1px #8a6d1f" }}>
+              <p className="font-pixel text-[9px] text-[#e9c46a] mb-1 flex items-center gap-1.5">
+                <IconStar className="w-3.5 h-3.5" /> ПУТЬ ГЕРОЯ
+              </p>
+              <p className="font-body text-[10px] text-dim leading-snug mb-2">
+                Пятеро врагов подряд — от Болванчика до Шиноби. HP копится: за каждую победу{" "}
+                <span className="text-[#e9c46a]">+1 HP</span>. Пройдёшь всех — получишь{" "}
+                <span className="text-[#e9c46a]">золотой скин</span>.
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={onGauntlet}
+                  disabled={netPanel.state !== "off"}
+                  className="px-btn no-select flex-1 py-2 bg-[#8a6d1f] text-[#070919] text-[11px] tracking-wider"
+                >
+                  В ПУТЬ
+                </button>
+                {goldenUnlocked && (
+                  <button
+                    onClick={onToggleGolden}
+                    title="Играть золотым ронином в соло-режимах"
+                    className={`px-btn no-select px-2.5 py-2 text-[9px] ${
+                      goldenEquip ? "bg-[#e9c46a] text-[#070919]" : "bg-panel text-dim"
+                    }`}
+                  >
+                    {goldenEquip ? "ЗОЛОТОЙ ✓" : "ОБЫЧНЫЙ"}
+                  </button>
+                )}
+              </div>
+              {!goldenUnlocked && (
+                <p className="font-body text-[9px] text-dim/70 mt-1.5 leading-tight">
+                  Награда ещё не открыта — пройди путь до конца.
+                </p>
+              )}
+            </div>
+
+            {/* ---- сетевая дуэль ---- */}
+            <div className="mt-3 pt-2.5 border-t-2 border-dashed border-[#39406e]">
+              <p className="font-pixel text-[9px] text-[#3ddad7] mb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-[#3ddad7] inline-block anim-blink" />
+                СЕТЕВАЯ ДУЭЛЬ (P2P)
+              </p>
+
+              {/* выбор транспорта */}
+              <div className="flex gap-1 mb-2">
+                <button
+                  onClick={() => netPanel.setTransport("online")}
+                  disabled={netPanel.state !== "off"}
+                  className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
+                    netPanel.transport === "online" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
+                  }`}
+                >
+                  ПО КОДУ · БЕЗ СЕРВЕРА
+                </button>
+                <button
+                  onClick={() => netPanel.setTransport("lan")}
+                  disabled={netPanel.state !== "off"}
+                  className={`px-btn no-select flex-1 py-1.5 text-[8px] tracking-wider ${
+                    netPanel.transport === "lan" ? "bg-[#0e6b69] text-paper" : "bg-ink2 text-dim"
+                  }`}
+                >
+                  ПО IP · СВОЙ СЕРВЕР
+                </button>
+              </div>
+
+              {netPanel.state === "off" && (
+                <div className="flex flex-col gap-1.5">
+                  {netPanel.transport === "online" ? (
+                    <>
+                      <p className="font-body text-[9px] text-dim/80 leading-snug">
+                        Чистый WebRTC — без PeerJS и без серверов. Обменяйтесь двумя кодами в любом
+                        мессенджере — и канал станет прямым: браузер ↔ браузер.
+                      </p>
+                      <button
+                        onClick={netPanel.onCreate}
+                        className="px-btn no-select w-full py-2 bg-[#0e6b69] text-paper text-[10px] tracking-wider"
+                      >
+                        СОЗДАТЬ ДУЭЛЬ (ХОСТ)
+                      </button>
+                      <button
+                        onClick={netPanel.onGuestStart}
+                        className="px-btn no-select w-full py-2 bg-panel text-paper text-[10px] tracking-wider"
+                      >
+                        ПРИСОЕДИНИТЬСЯ (ГОСТЬ)
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex gap-1.5">
+                        <input
+                          value={netPanel.ip}
+                          onChange={(e) => netPanel.setIp(e.target.value.trim())}
+                          placeholder="192.168.1.5:5199"
+                          spellCheck={false}
+                          className="font-body flex-1 min-w-0 px-2 py-2 bg-ink2 border-2 border-[#070919] text-[#3ddad7] text-[11px] tracking-wider placeholder:text-[#39406e] outline-none focus:border-[#3ddad7]"
+                        />
+                        <button
+                          onClick={netPanel.onConnectLan}
+                          disabled={!netPanel.ip.trim()}
+                          className="px-btn no-select px-4 py-2 bg-[#0e6b69] text-paper text-[10px] disabled:opacity-35"
+                        >
+                          ВОЙТИ
+                        </button>
+                      </div>
+                      <p className="font-body text-[9px] text-dim/70 leading-tight">
+                        На машине хоста запустите <span className="text-[#3ddad7]">node tools/lan-server.cjs</span> —
+                        сервер покажет IP. Оба игрока вводят этот «IP:порт» здесь. Работает в локальной
+                        сети без интернета; для игры через сеть — проброс порта.
+                      </p>
+                    </>
+                  )}
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight">{netPanel.error}</p>
+                  )}
+                </div>
+              )}
+
+              {netPanel.state === "hosting" && netPanel.transport === "online" && (
+                <div>
+                  <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 1/2 — ОТПРАВЬТЕ ПРИГЛАШЕНИЕ</p>
+                  {!netPanel.invite ? (
+                    <p className="font-body text-[10px] text-dim mb-2">
+                      Создаём приглашение… <span className="anim-blink">▮</span>
+                    </p>
+                  ) : (
+                    <div className="mb-2">
+                      <textarea
+                        readOnly
+                        value={netPanel.invite}
+                        onFocus={(e) => e.currentTarget.select()}
+                        spellCheck={false}
+                        className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-[#3ddad7] outline-none focus:border-[#3ddad7] mb-1"
+                      />
+                      <button
+                        onClick={() => netPanel.onCopy(netPanel.invite, "invite")}
+                        className="px-btn no-select w-full py-1.5 bg-[#0e6b69] text-paper text-[9px]"
+                      >
+                        {netPanel.copied === "invite" ? "СКОПИРОВАНО!" : "⧉ СКОПИРОВАТЬ ПРИГЛАШЕНИЕ"}
+                      </button>
+                      <p className="font-body text-[9px] text-dim/70 mt-1 leading-tight">
+                        Перешлите этот код другу в любом мессенджере.
+                      </p>
+                    </div>
+                  )}
+                  <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 2/2 — ВСТАВЬТЕ ОТВЕТ ДРУГА</p>
+                  <textarea
+                    value={netPanel.answerInput}
+                    onChange={(e) => netPanel.setAnswerInput(e.target.value)}
+                    placeholder="Код ответа от друга…"
+                    spellCheck={false}
+                    className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-paper outline-none focus:border-gold placeholder:text-[#39406e]"
+                  />
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                  )}
+                  <div className="flex gap-1.5 mt-1.5">
+                    <button
+                      onClick={netPanel.onAcceptAnswer}
+                      disabled={!netPanel.answerInput.trim()}
+                      className="px-btn no-select flex-1 py-2 bg-gold text-[#070919] text-[10px] disabled:opacity-35"
+                    >
+                      СОЕДИНИТЬ
+                    </button>
+                    <button onClick={netPanel.onCancel} className="px-btn no-select px-3 py-2 bg-panel text-dim text-[9px]">
+                      ОТМЕНА
+                    </button>
+                  </div>
+                  <p className="font-body text-[9px] text-dim mt-1.5">
+                    После соединения бой начнётся автоматически. <span className="anim-blink">▮</span>
+                  </p>
+                </div>
+              )}
+
+              {netPanel.state === "joining" && netPanel.transport === "lan" && (
+                <div className="text-center">
+                  <p className="font-body text-[10px] text-dim mb-2">
+                    Подключаемся к <span className="text-[#3ddad7] font-pixel">{netPanel.ip}</span>…{" "}
+                    <span className="anim-blink">▮</span>
+                  </p>
+                  <p className="font-body text-[9px] text-dim/70 leading-tight mb-2">
+                    Первый вошедший — хост. Когда войдёт второй боец, бой начнётся автоматически.
+                  </p>
+                  {netPanel.error && (
+                    <p className="font-body text-[10px] text-blood leading-tight mb-2">{netPanel.error}</p>
+                  )}
+                  <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px]">
+                    ОТМЕНА
+                  </button>
+                </div>
+              )}
+
+              {netPanel.state === "joining" && netPanel.transport === "online" && (
+                <div>
+                  {!netPanel.answer ? (
+                    <>
+                      <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 1/2 — ВСТАВЬТЕ ПРИГЛАШЕНИЕ ХОСТА</p>
+                      <textarea
+                        value={netPanel.inviteInput}
+                        onChange={(e) => netPanel.setInviteInput(e.target.value)}
+                        placeholder="Код приглашения от хоста…"
+                        spellCheck={false}
+                        className="w-full h-16 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-paper outline-none focus:border-gold placeholder:text-[#39406e]"
+                      />
+                      {netPanel.error && (
+                        <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                      )}
+                      <div className="flex gap-1.5 mt-1.5">
+                        <button
+                          onClick={netPanel.onMakeAnswer}
+                          disabled={!netPanel.inviteInput.trim()}
+                          className="px-btn no-select flex-1 py-2 bg-gold text-[#070919] text-[10px] disabled:opacity-35"
+                        >
+                          СОЗДАТЬ ОТВЕТ
+                        </button>
+                        <button onClick={netPanel.onCancel} className="px-btn no-select px-3 py-2 bg-panel text-dim text-[9px]">
+                          ОТМЕНА
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-pixel text-[8px] text-gold mb-1">ШАГ 2/2 — ОТПРАВЬТЕ ОТВЕТ ХОСТУ</p>
+                      <textarea
+                        readOnly
+                        value={netPanel.answer}
+                        onFocus={(e) => e.currentTarget.select()}
+                        spellCheck={false}
+                        className="w-full h-14 resize-none font-body text-[9px] leading-tight break-all px-2 py-1.5 bg-ink2 border-2 border-[#070919] text-[#3ddad7] outline-none focus:border-[#3ddad7] mb-1"
+                      />
+                      <button
+                        onClick={() => netPanel.onCopy(netPanel.answer, "answer")}
+                        className="px-btn no-select w-full py-1.5 bg-[#0e6b69] text-paper text-[9px]"
+                      >
+                        {netPanel.copied === "answer" ? "СКОПИРОВАНО!" : "⧉ СКОПИРОВАТЬ ОТВЕТ"}
+                      </button>
+                      {netPanel.error && (
+                        <p className="font-body text-[10px] text-blood leading-tight mt-1">{netPanel.error}</p>
+                      )}
+                      <p className="font-body text-[9px] text-dim mt-1.5">
+                        Хост вставляет ваш ответ у себя — и канал откроется. Ждём…{" "}
+                        <span className="anim-blink">▮</span>
+                      </p>
+                      <button onClick={netPanel.onCancel} className="px-btn no-select px-4 py-1.5 bg-panel text-dim text-[9px] mt-1">
+                        ОТМЕНА
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {netPanel.state === "connected" && (
+                <div className="text-center">
+                  <p className="font-pixel text-[11px] text-gold mb-1">СОПЕРНИК НАЙДЕН!</p>
+                  <p className="font-body text-[10px] text-dim">Бой начинается…</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* rules: collapsed by default */}
+          <button
+            onClick={() => {
+              initAudio();
+              sfx.tick();
+              setRulesOpen((o) => !o);
+            }}
+            className="px-btn no-select w-full mt-1.5 px-3 py-2 bg-panel text-paper text-[9px] flex items-center justify-between"
+          >
+            <span>ПРАВИЛА И КУБИКИ</span>
+            <span className={`inline-block text-gold transition-transform duration-150 ${rulesOpen ? "rotate-180" : ""}`}>▼</span>
+          </button>
+          {rulesOpen && (
+            <div className="px-panel mt-1 p-2.5 bg-panel anim-rise">
+              <p className="font-body text-[11px] text-dim leading-snug mb-2">
+                Оба бойца бросают по <span className="text-paper">6 кубиков</span> — руки открыты, но каждый тайно выбирает{" "}
+                <span className="text-paper">3</span>. Кубики вскрываются по одному, бойцы действуют{" "}
+                <span className="text-paper">одновременно</span>. За краем помоста — пропасть.
+              </p>
+              <Codex />
+            </div>
+          )}
+
+          <p className="font-body text-[9px] text-dim/70 text-center mt-2">
+            [1–6] взять кубик · [Enter] бой · [Esc] пауза · [M] звук · [N] музыка
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCell({ v, label, color }: { v: number; label: string; color?: string }) {
+  return (
+    <div className="px-panel bg-ink2 px-2 py-2 text-center">
+      <span className="block font-pixel text-[15px] md:text-[18px]" style={{ color: color ?? "#f2eeda" }}>
+        {v}
+      </span>
+      <span className="block font-body text-[10px] text-dim mt-1">{label}</span>
+    </div>
+  );
+}
+
+function OverScreen({
+  result,
+  stats,
+  enemyName,
+  onRematch,
+  onMenu,
+  onLobby,
+  rematchLabel = "РЕВАНШ",
+}: {
+  result: GameResult;
+  stats: MatchStats;
+  enemyName: string;
+  onRematch: () => void;
+  onMenu: () => void;
+  onLobby?: () => void;
+  rematchLabel?: string;
+}) {
+  const map = {
+    win: { text: "ПОБЕДА", color: "#ffc24b", line: `${enemyName} повержен. Помост твой.` },
+    lose: { text: "ПОРАЖЕНИЕ", color: "#ff4757", line: `${enemyName} оказался быстрее. Встань и вернись.` },
+    draw: { text: "НИЧЬЯ", color: "#aebbdd", line: "Помост расступился под обоими. Никто не победил." },
+  }[result];
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/80 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-lg anim-rise">
+          <p className="font-pixel text-[9px] text-dim text-center mb-2">ДУЭЛЬ ОКОНЧЕНА</p>
+          <h2
+            className="anim-slam font-pixel text-center text-[30px] md:text-[46px] leading-none mb-2"
+            style={{ color: map.color, textShadow: "4px 4px 0 #070919" }}
+          >
+            {map.text}
+          </h2>
+          <p className="font-body text-[12px] text-dim text-center mb-4">{map.line}</p>
+          <div className="grid grid-cols-4 gap-1.5 mb-4">
+            <StatCell v={stats.exchanges} label="обмены" />
+            <StatCell v={stats.dealt} label="урон" color="#ffc24b" />
+            <StatCell v={stats.taken} label="получено" color="#ff4757" />
+            <StatCell v={stats.blocks} label="блоки" color="#aebbdd" />
+            <StatCell v={stats.dodges} label="уклоны" color="#b08cff" />
+            <StatCell v={stats.whiffs} label="промахи" color="#8f96c4" />
+            <StatCell v={stats.leaps} label="прыжки" color="#3ddad7" />
+            <StatCell v={stats.dealt - stats.taken} label="разница" color="#3ddad7" />
+          </div>
+          {onLobby ? (
+            <>
+              <div className="flex gap-2">
+                <button
+                  onClick={onLobby}
+                  className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2"
+                >
+                  <IconHome className="w-4 h-4" /> В ЛОББИ
+                </button>
+                <button
+                  onClick={onRematch}
+                  className="px-btn no-select flex-1 py-3 bg-[#0e6b69] text-paper text-[10px] md:text-[12px] flex items-center justify-center gap-2"
+                >
+                  <IconRetry className="w-4 h-4" /> {rematchLabel}
+                </button>
+              </div>
+              <button
+                onClick={onMenu}
+                className="px-btn no-select w-full mt-2 py-2 bg-panel text-dim text-[9px] flex items-center justify-center gap-2"
+              >
+                В МЕНЮ · РАЗЪЕДИНИТЬ
+              </button>
+            </>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={onRematch} className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2">
+                <IconRetry className="w-4 h-4" /> {rematchLabel}
+              </button>
+              <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px] flex items-center justify-center gap-2">
+                <IconHome className="w-4 h-4" /> В МЕНЮ
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- gauntlet screens
+
+function GauntletProgress({ index }: { index: number }) {
+  return (
+    <div className="flex items-center justify-center gap-1.5 mb-4">
+      {GAUNTLET_ORDER.map((p, i) => {
+        const meta = PERSONALITIES[p];
+        const done = i < index;
+        const cur = i === index;
+        return (
+          <div key={p} className="flex items-center gap-1.5">
+            <div
+              className={`w-8 h-8 flex items-center justify-center border-2 border-[#070919] ${
+                done ? "opacity-40" : cur ? "anim-active-step" : "opacity-70"
+              }`}
+              style={{ background: done ? "#1c2244" : meta.color + "33", color: meta.color }}
+              title={meta.name}
+            >
+              {done ? <span className="font-pixel text-[10px]">✕</span> : <IconSkull className="w-4 h-4" />}
+            </div>
+            {i < GAUNTLET_ORDER.length - 1 && <span className="font-pixel text-[8px] text-[#39406e]">—</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function GauntletRest({
+  index,
+  healed,
+  pHp,
+  onNext,
+}: {
+  index: number;
+  healed: boolean;
+  pHp: number;
+  onNext: () => void;
+}) {
+  const next = PERSONALITIES[GAUNTLET_ORDER[index]];
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/80 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise">
+          <p className="font-pixel text-[9px] text-dim text-center mb-1">ПРИВАЛ</p>
+          <h2 className="font-pixel text-center text-[22px] md:text-[28px] text-[#e9c46a] leading-none mb-3" style={{ textShadow: "3px 3px 0 #070919" }}>
+            ВРАГ ПОВЕРЖЕН
+          </h2>
+          <p className="font-pixel text-center text-[11px] mb-1" style={{ color: healed ? "#2a9d8f" : "#8f96c4" }}>
+            {healed ? "+1 HP" : "HP УЖЕ ПОЛНОЕ"}
+          </p>
+          <div className="flex justify-center mb-4">
+            <Pips hp={pHp} />
+          </div>
+          <GauntletProgress index={index} />
+          <div className="px-panel p-3 bg-panel text-center mb-4">
+            <p className="font-body text-[11px] text-dim mb-2">Следующий противник:</p>
+            <div className="flex items-center justify-center gap-3">
+              <FighterPreview kind={PERSONALITY_KIND[GAUNTLET_ORDER[index]]} size={56} />
+              <div className="text-left">
+                <p className="font-pixel text-[12px]" style={{ color: next.color }}>{next.name}</p>
+                <p className="font-body text-[10px] text-dim mt-0.5">{next.title}</p>
+              </div>
+            </div>
+          </div>
+          <button onClick={onNext} className="px-btn no-select w-full py-3 bg-[#e9c46a] text-[#070919] text-[12px] tracking-wider">
+            СЛЕДУЮЩИЙ ВРАГ →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GauntletDone({ onMenu, onAgain }: { onMenu: () => void; onAgain: () => void }) {
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise text-center">
+          <p className="font-pixel text-[9px] text-dim mb-2">ПУТЬ ГЕРОЯ</p>
+          <h2 className="anim-slam font-pixel text-[26px] md:text-[34px] text-[#e9c46a] leading-none mb-1" style={{ textShadow: "4px 4px 0 #070919" }}>
+            ПУТЬ ПРОЙДЕН
+          </h2>
+          <p className="font-body text-[12px] text-dim mb-4">Все пятеро повержены. Помост склоняется перед тобой.</p>
+          <div className="flex justify-center mb-3">
+            <FighterPreview kind="golden" size={96} />
+          </div>
+          <p className="font-pixel text-[11px] text-[#e9c46a] mb-1 anim-blink">ЗОЛОТОЙ СКИН ОТКРЫТ!</p>
+          <p className="font-body text-[10px] text-dim mb-4">Теперь ты можешь играть золотым ронином — и в соло, и в сети.</p>
+          <div className="flex gap-2">
+            <button onClick={onAgain} className="px-btn no-select flex-1 py-3 bg-[#8a6d1f] text-[#070919] text-[11px]">
+              ЕЩЁ РАЗ
+            </button>
+            <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[11px]">
+              В МЕНЮ
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GauntletOver({
+  index,
+  stats,
+  onRetry,
+  onMenu,
+}: {
+  index: number;
+  stats: MatchStats;
+  onRetry: () => void;
+  onMenu: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/80 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-md anim-rise">
+          <h2 className="anim-slam font-pixel text-center text-[26px] md:text-[32px] text-blood leading-none mb-1" style={{ textShadow: "4px 4px 0 #070919" }}>
+            ПУТЬ ОБОРВАН
+          </h2>
+          <p className="font-body text-[12px] text-dim text-center mb-3">
+            Ты пал на враге <span className="text-paper font-pixel">{index + 1}</span> из 5. Помост ждёт новой попытки.
+          </p>
+          <GauntletProgress index={index} />
+          <div className="grid grid-cols-4 gap-1.5 mb-4">
+            <StatCell v={index} label="пройдено" color="#e9c46a" />
+            <StatCell v={stats.dealt} label="урон" color="#ffc24b" />
+            <StatCell v={stats.taken} label="получено" color="#ff4757" />
+            <StatCell v={stats.exchanges} label="обмены" />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onRetry} className="px-btn no-select flex-1 py-3 bg-blood text-paper text-[12px]">
+              ЗАНОВО
+            </button>
+            <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px]">
+              В МЕНЮ
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- app
+
+function PreviewSlot({ kind, label, color }: { kind: FighterKind | null; label: string; color: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div className="w-[76px] h-[104px] border-[3px] border-[#070919] bg-ink2 flex items-end justify-center overflow-hidden">
+        {kind ? (
+          <FighterPreview kind={kind} size={64} />
+        ) : (
+          <span className="font-pixel text-[20px] text-[#39406e] mb-6">?</span>
+        )}
+      </div>
+      <span className="font-pixel text-[8px] leading-none" style={{ color: kind ? color : "#39406e" }}>
+        {kind ? FIGHTER_OPTIONS.find((o) => o.kind === kind)?.name ?? label : label}
+      </span>
+    </div>
+  );
+}
+
+function LobbyScreen({
+  myKind,
+  peerKind,
+  peerName,
+  goldenUnlocked,
+  onPick,
+  onStart,
+}: {
+  myKind: FighterKind | null;
+  peerKind: FighterKind | null;
+  peerName: string;
+  goldenUnlocked: boolean;
+  onPick: (k: FighterKind) => void;
+  onStart: () => void;
+}) {
+  const isHost = net.isHost;
+  const canStart = !!myKind && !!peerKind && myKind !== peerKind;
+  const options = goldenUnlocked ? FIGHTER_OPTIONS : FIGHTER_OPTIONS.filter((o) => o.kind !== "golden");
+  return (
+    <div className="absolute inset-0 z-40 overflow-y-auto bg-[#070919]/85 anim-overlay">
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-2xl anim-rise">
+          <p className="font-pixel text-[8px] md:text-[9px] text-[#3ddad7] text-center mb-2 tracking-wider">
+            СЕТЕВАЯ ДУЭЛЬ · СОПЕРНИК: {peerName}
+          </p>
+          <h2
+            className="font-pixel text-center text-[22px] md:text-[28px] text-paper mb-5"
+            style={{ textShadow: "3px 3px 0 #000" }}
+          >
+            ВЫБОР БОЙЦА
+          </h2>
+
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-5">
+            {FIGHTER_OPTIONS.filter((o) => o.kind !== "golden" || goldenUnlocked).map((o) => {
+              const mine = myKind === o.kind;
+              const theirs = peerKind === o.kind;
+              return (
+                <button
+                  key={o.kind}
+                  onClick={() => onPick(o.kind)}
+                  disabled={theirs}
+                  className={`no-select relative flex flex-col items-center gap-1 px-1 pt-3 pb-1.5 border-[3px] border-[#070919] bg-ink2 transition-all duration-100 ${
+                    theirs ? "opacity-40 cursor-not-allowed" : "hover:bg-ink hover:-translate-y-0.5"
+                  } ${mine ? "bg-ink" : ""}`}
+                  style={
+                    mine
+                      ? { boxShadow: "inset 0 0 0 2px #ffc24b, 0 0 16px rgba(255,194,75,0.35)" }
+                      : theirs
+                        ? { boxShadow: `inset 0 0 0 2px ${o.color}` }
+                        : undefined
+                  }
+                  title={o.name}
+                >
+                  {mine && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 font-pixel text-[6px] bg-gold text-[#070919] px-1 py-px">
+                      ВЫ
+                    </span>
+                  )}
+                  {theirs && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 font-pixel text-[6px] bg-blood text-paper px-1 py-px whitespace-nowrap">
+                      СОПЕРНИК
+                    </span>
+                  )}
+                  <FighterPreview kind={o.kind} size={48} />
+                  <span className="font-pixel text-[7px] leading-none" style={{ color: o.color }}>
+                    {o.name}
+                  </span>
+                  <span className="font-body text-[8px] text-dim leading-none">
+                    {DICE_POOLS[o.kind === "golden" ? "ronin" : o.kind].length} куб.
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-center gap-5 mb-5">
+            <PreviewSlot kind={myKind} label="ВЫ" color="#ffc24b" />
+            <span className="font-pixel text-[18px] text-blood" style={{ textShadow: "2px 2px 0 #000" }}>
+              VS
+            </span>
+            <PreviewSlot kind={peerKind} label={peerName} color="#ff5964" />
+          </div>
+
+          <div className="text-center">
+            {!myKind || !peerKind ? (
+              <p className="font-body text-[11px] text-dim mb-3">Оба игрока должны выбрать бойца…</p>
+            ) : myKind === peerKind ? (
+              <p className="font-body text-[11px] text-blood mb-3">Один боец на двоих — пусть кто-то сменит!</p>
+            ) : null}
+            {isHost ? (
+              <button
+                onClick={onStart}
+                disabled={!canStart}
+                className="px-btn no-select px-6 py-3 bg-gold text-[#070919] text-[12px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                НАЧАТЬ БОЙ
+              </button>
+            ) : (
+              <p className="font-pixel text-[9px] text-dim">
+                ЖДЁМ ХОСТА… <span className="anim-blink">▮</span>
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const engineRef = useRef<Engine | null>(null);
+  if (!engineRef.current) engineRef.current = new Engine();
+  const engine = engineRef.current;
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [ui, setUi] = useState<UiSnapshot>(initialUi);
+  // each slot stores an index into the rolled player hand (or null)
+  const [slots, setSlots] = useState<(number | null)[]>([null, null, null]);
+  const [pers, setPers] = useState<MenuChoice>("aggressor");
+  const [muted, setMutedState] = useState(isMuted());
+  const [music, setMusicState] = useState(isMusicOn());
+  const [paused, setPaused] = useState(false);
+
+  // ---- сетевая дуэль ----
+  const [netState, setNetState] = useState<"off" | "hosting" | "joining" | "connected">("off");
+  const [netTransport, setNetTransport] = useState<Transport>("online");
+  const [ipAddr, setIpAddr] = useState(""); // lan: адрес relay-сервера
+  const [inviteCode, setInviteCode] = useState(""); // хост: приглашение для друга
+  const [answerCode, setAnswerCode] = useState(""); // гость: ответ для хоста
+  const [inviteInput, setInviteInput] = useState(""); // гость вставляет приглашение
+  const [answerInput, setAnswerInput] = useState(""); // хост вставляет ответ
+  const [copied, setCopied] = useState<string | null>(null);
+  const [netPeerName, setNetPeerName] = useState("Соперник");
+  const [netError, setNetError] = useState("");
+  const [netDrop, setNetDrop] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(20);
+  const [oppWantsRematch, setOppWantsRematch] = useState(false);
+  const [rematchSent, setRematchSent] = useState(false);
+  // золотой скин (награда за «Путь героя»)
+  const [goldenUnlocked, setGoldenUnlocked] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("bs-golden-unlocked") === "1"
+  );
+  const [goldenEquip, setGoldenEquip] = useState(
+    () => typeof localStorage !== "undefined" && localStorage.getItem("bs-golden-equip") === "1"
+  );
+  // лобби выбора бойца
+  const [myKind, setMyKind] = useState<FighterKind | null>(null);
+  const [peerKind, setPeerKind] = useState<FighterKind | null>(null);
+  const [lobby, setLobby] = useState(false);
+  const myRematchRef = useRef(false);
+  const oppRematchRef = useRef(false);
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+
+  // ---- fit-to-window: весь интерфейс масштабируется под окно (2K/4K и мелкие окна) ----
+  const [fit, setFit] = useState(1);
+  useEffect(() => {
+    const compute = () => {
+      const s = Math.min(window.innerWidth / 1280, window.innerHeight / 800);
+      setFit(Math.min(3, Math.max(0.7, s)));
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, []);
+  const zoomOk =
+    typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("zoom", "1");
+  const myKindRef = useRef<FighterKind | null>(null);
+  myKindRef.current = myKind;
+  const peerKindRef = useRef<FighterKind | null>(null);
+  peerKindRef.current = peerKind;
+  const netPeerNameRef = useRef("Соперник");
+  netPeerNameRef.current = netPeerName;
+
+  const resetNetUi = useCallback(() => {
+    setNetState("off");
+    setIpAddr("");
+    setInviteCode("");
+    setAnswerCode("");
+    setInviteInput("");
+    setAnswerInput("");
+    setNetError("");
+    setNetPeerName("Соперник");
+    setMyKind(null);
+    setPeerKind(null);
+    setLobby(false);
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+  }, []);
+
+  const beginNetMatch = useCallback(() => {
+    initAudio();
+    setPaused(false);
+    engine.paused = false;
+    setSlots([null, null, null]);
+    setLobby(false);
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+    engine.startNetMatch(
+      netPeerNameRef.current || "Соперник",
+      myKindRef.current ?? "ronin",
+      peerKindRef.current ?? "ronin"
+    );
+  }, [engine]);
+
+  /** Выбор своего бойца в лобби (отправляется сопернику). */
+  const pickKind = useCallback((k: FighterKind) => {
+    if (peerKindRef.current === k) return; // этот боец занят соперником
+    initAudio();
+    sfx.select();
+    setMyKind(k);
+    net.send({ t: "look", look: k });
+  }, []);
+
+  /** Хост запускает бой из лобби, когда оба выбрали разных бойцов. */
+  const startFromLobby = useCallback(() => {
+    const me = myKindRef.current;
+    const foe = peerKindRef.current;
+    if (!me || !foe || me === foe) return;
+    initAudio();
+    sfx.fight();
+    net.send({ t: "begin" });
+    beginNetMatch();
+  }, [beginNetMatch]);
+
+  useEffect(() => {
+    engine.setListener((patch) => setUi((u) => ({ ...u, ...patch })));
+    if (canvasRef.current) engine.attach(canvasRef.current);
+    engine.netSend = (m) => net.send(m);
+    return () => {
+      engine.detach();
+      net.teardown();
+    };
+  }, [engine]);
+
+  // держим внутренний буфер канваса в соответствии с fit-масштабом окна
+  useEffect(() => {
+    engine.setRenderScale(fit);
+  }, [engine, fit]);
+
+  // сетевые события: подключение, сообщения, разрыв
+  useEffect(() => {
+    const hooks = {
+      onInvite: (code: string) => {
+        setInviteCode(code);
+        setNetError("");
+      },
+      onAnswer: (code: string) => {
+        setAnswerCode(code);
+        setNetError("");
+      },
+      onConnected: (_name: string, _isHost: boolean) => {
+        setNetState("connected");
+        setNetError("");
+        sfx.win();
+        setLobby(true);
+        // если выбор уже был сделан — сообщить сопернику
+        if (myKindRef.current) net.send({ t: "look", look: myKindRef.current });
+      },
+      onMsg: (m: NetMsg) => {
+        if (m.t === "hello") {
+          setNetPeerName(m.name || "Соперник");
+        } else if (m.t === "look") {
+          setPeerKind(m.look as FighterKind);
+        } else if (m.t === "begin") {
+          window.setTimeout(beginNetMatch, 350);
+        } else if (m.t === "hand") {
+          engine.receiveNetHand(m.hand as Action[]);
+        } else if (m.t === "plan") {
+          engine.receiveNetPlan(m.plan as Action[]);
+        } else if (m.t === "rematch") {
+          oppRematchRef.current = true;
+          setOppWantsRematch(true);
+          sfx.select();
+          if (myRematchRef.current) beginNetMatch();
+        } else if (m.t === "lobby") {
+          // соперник вернулся в лобби — последуем за ним, соединение живёт
+          setNetDrop(false);
+          setLobby(true);
+          myRematchRef.current = false;
+          oppRematchRef.current = false;
+          setOppWantsRematch(false);
+          setRematchSent(false);
+          engine.backToLobby();
+        } else if (m.t === "quit") {
+          if (uiRef.current.screen !== "menu") {
+            engine.toMenu();
+            setNetDrop(true);
+          }
+          net.teardown();
+          resetNetUi();
+        }
+      },
+      onDrop: () => {
+        if (uiRef.current.screen !== "menu") {
+          engine.toMenu();
+          setNetDrop(true);
+        }
+        resetNetUi();
+      },
+      onError: (msg: string) => {
+        setNetError(msg);
+        setNetState("off");
+        setInviteCode("");
+        setAnswerCode("");
+      },
+    };
+    net.setHooks(hooks);
+  }, [engine, beginNetMatch, resetNetUi]);
+
+  // скрыть уведомление о разрыве через 3.5 с
+  useEffect(() => {
+    if (!netDrop) return;
+    const t = window.setTimeout(() => setNetDrop(false), 3500);
+    return () => window.clearTimeout(t);
+  }, [netDrop]);
+
+  // таймер 20 секунд на планирование (сетевая игра)
+  useEffect(() => {
+    if (!(ui.screen === "play" && ui.mode === "net" && ui.phase === "plan")) return;
+    setTimeLeft(20);
+    const iv = window.setInterval(() => setTimeLeft((t) => Math.max(0, t - 0.1)), 100);
+    return () => window.clearInterval(iv);
+  }, [ui.screen, ui.mode, ui.phase, ui.round]);
+
+  useEffect(() => {
+    if (!(ui.screen === "play" && ui.mode === "net" && ui.phase === "plan")) return;
+    if (timeLeft > 0) return;
+    // время вышло: незаполненные слоты становятся «стойкой»
+    const plan = slotsRef.current.map((i) =>
+      i === null ? "wait" : uiRef.current.playerHand[i] ?? "wait"
+    ) as Action[];
+    sfx.ko();
+    engine.commitNetPlan(plan);
+    setSlots([null, null, null]);
+  }, [timeLeft, ui.screen, ui.mode, ui.phase, engine]);
+
+  const selectHandDie = useCallback(
+    (handIdx: number) => {
+      if (ui.phase !== "plan") return;
+      if (handIdx < 0 || handIdx >= ui.playerHand.length) return;
+      initAudio();
+      setSlots((s) => {
+        const at = s.indexOf(handIdx);
+        if (at >= 0) {
+          sfx.back();
+          const n = [...s];
+          n[at] = null;
+          return n;
+        }
+        const empty = s.indexOf(null);
+        if (empty < 0) {
+          sfx.bump();
+          return s;
+        }
+        sfx.slot();
+        const n = [...s];
+        n[empty] = handIdx;
+        return n;
+      });
+    },
+    [ui.phase, ui.playerHand]
+  );
+
+  const clearSlots = useCallback(() => {
+    if (ui.phase !== "plan") return;
+    sfx.back();
+    setSlots([null, null, null]);
+  }, [ui.phase]);
+
+  const ready = slots.every((s) => s !== null);
+
+  const fight = useCallback(() => {
+    if (ui.phase !== "plan" || !ready) return;
+    initAudio();
+    sfx.fight();
+    const plan = slots.map((i) => (i === null ? "fwd" : ui.playerHand[i] ?? "fwd")) as Action[];
+    if (ui.mode === "net") engine.commitNetPlan(plan);
+    else engine.fight(plan);
+    setSlots([null, null, null]);
+  }, [ui.phase, ui.mode, ready, slots, ui.playerHand, engine]);
+
+  const startMatch = useCallback(() => {
+    if (netState === "connected" || netState === "hosting" || netState === "joining") return;
+    initAudio();
+    setPaused(false);
+    engine.paused = false;
+    setSlots([null, null, null]);
+    const all: Personality[] = ["random", "aggressor", "controller", "mirror"];
+    const choice = pers === "any" ? all[Math.floor(Math.random() * all.length)] : pers;
+    engine.startMatch(choice);
+  }, [engine, pers, netState]);
+
+  // ---- «Путь героя» ----
+  const startGauntlet = useCallback(() => {
+    if (netState === "connected" || netState === "hosting" || netState === "joining") return;
+    initAudio();
+    sfx.fight();
+    setPaused(false);
+    engine.paused = false;
+    setSlots([null, null, null]);
+    engine.startGauntlet(goldenUnlocked && goldenEquip);
+  }, [engine, netState, goldenUnlocked, goldenEquip]);
+
+  const continueGauntlet = useCallback(() => {
+    initAudio();
+    sfx.select();
+    engine.nextGauntlet();
+  }, [engine]);
+
+  /** Разблокировать золотой скин (один раз, навсегда). */
+  const unlockGolden = useCallback(() => {
+    setGoldenUnlocked(true);
+    setGoldenEquip(true);
+    try {
+      localStorage.setItem("bs-golden-unlocked", "1");
+      localStorage.setItem("bs-golden-equip", "1");
+    } catch { /* noop */ }
+  }, []);
+
+  /** Переключить экипировку золотого скина в соло-режимах. */
+  const toggleGoldenEquip = useCallback(() => {
+    initAudio();
+    sfx.tick();
+    setGoldenEquip((v) => {
+      const nv = !v;
+      try {
+        localStorage.setItem("bs-golden-equip", nv ? "1" : "0");
+      } catch { /* noop */ }
+      return nv;
+    });
+  }, []);
+
+  // путь пройден — разблокировать золотой скин (со звуком)
+  useEffect(() => {
+    if (ui.screen === "g_done" && !goldenUnlocked) {
+      const t = window.setTimeout(() => {
+        sfx.unlock();
+        unlockGolden();
+      }, 450);
+      return () => window.clearTimeout(t);
+    }
+  }, [ui.screen, goldenUnlocked, unlockGolden]);
+
+  // ---- сетевые действия из меню ----
+  /** Хост режима «по коду» (чистый WebRTC). */
+  const createRoom = useCallback(() => {
+    if (!HAS_WEBRTC) {
+      setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
+      return;
+    }
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.hostOnline();
+    setNetState("hosting");
+  }, []);
+
+  /** Вход по IP через свой relay-сервер (tools/lan-server.cjs). */
+  const connectLan = useCallback(() => {
+    const addr = ipAddr.trim();
+    if (!addr) {
+      setNetError("Введите адрес сервера, например 192.168.1.5:5199.");
+      return;
+    }
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.lanConnect(addr);
+    setNetState("joining");
+  }, [ipAddr]);
+
+  /** Гость (интернет): готовимся принять приглашение. */
+  const guestStart = useCallback(() => {
+    if (!HAS_WEBRTC) {
+      setNetError("WebRTC недоступен в этой среде. Откройте игру в обычном браузере (http/https).");
+      return;
+    }
+    initAudio();
+    sfx.select();
+    setNetError("");
+    setInviteCode("");
+    setAnswerCode("");
+    setInviteInput("");
+    setAnswerInput("");
+    net.joinOnline();
+    setNetState("joining");
+  }, []);
+
+  /** Хост: вставляем ответ друга — после этого канал откроется. */
+  const acceptAnswer = useCallback(() => {
+    if (!answerInput.trim()) return;
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.acceptAnswer(answerInput);
+  }, [answerInput]);
+
+  /** Гость: из приглашения создаём ответ. */
+  const makeAnswer = useCallback(() => {
+    if (!inviteInput.trim()) return;
+    initAudio();
+    sfx.select();
+    setNetError("");
+    net.createAnswer(inviteInput);
+  }, [inviteInput]);
+
+  const copyText = useCallback((text: string, key: string) => {
+    const done = () => {
+      sfx.slot();
+      setCopied(key);
+      window.setTimeout(() => setCopied((c) => (c === key ? null : c)), 1300);
+    };
+    try {
+      navigator.clipboard?.writeText(text).then(done).catch(done);
+    } catch {
+      done();
+    }
+  }, []);
+
+  const cancelNet = useCallback(() => {
+    net.send({ t: "quit" });
+    net.teardown();
+    resetNetUi();
+    sfx.back();
+  }, [resetNetUi]);
+
+  const togglePause = useCallback(() => {
+    if (ui.screen !== "play") return;
+    initAudio();
+    setPaused((p) => {
+      engine.paused = !p;
+      sfx.tick();
+      return !p;
+    });
+  }, [engine, ui.screen]);
+
+  const quitToMenu = useCallback(() => {
+    engine.paused = false;
+    setPaused(false);
+    if (net.connected) {
+      net.send({ t: "quit" });
+      net.teardown();
+      resetNetUi();
+    }
+    setNetDrop(false);
+    engine.toMenu();
+  }, [engine, resetNetUi]);
+
+  /** Реванш: в сетевой игре нужно согласие обоих. */
+  const requestRematch = useCallback(() => {
+    if (uiRef.current.mode !== "net") {
+      startMatch();
+      return;
+    }
+    if (myRematchRef.current) return; // уже ждём
+    initAudio();
+    sfx.select();
+    myRematchRef.current = true;
+    setRematchSent(true);
+    net.send({ t: "rematch" });
+    if (oppRematchRef.current) beginNetMatch();
+  }, [startMatch, beginNetMatch]);
+
+  /** Вернуться в лобби выбора бойца, НЕ разрывая соединение. */
+  const returnToLobby = useCallback(() => {
+    if (uiRef.current.mode !== "net") return;
+    initAudio();
+    sfx.select();
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+    setNetDrop(false);
+    setLobby(true);
+    engine.backToLobby();
+    net.send({ t: "lobby" });
+  }, [engine]);
+
+  const toggleMute = useCallback(() => {
+    initAudio();
+    const m = !isMuted();
+    setMuted(m);
+    setMutedState(m);
+    if (!m) sfx.tick();
+  }, []);
+
+  const toggleMusic = useCallback(() => {
+    initAudio();
+    const on = !isMusicOn();
+    setMusicOn(on);
+    setMusicState(on);
+    if (on) sfx.tick();
+  }, []);
+
+  // keyboard
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Enter" && ev.target instanceof HTMLButtonElement) return; // native click handles it
+      if (ev.key >= "1" && ev.key <= "6") {
+        selectHandDie(Number(ev.key) - 1);
+      } else if (ev.key === "Backspace" || ev.key.toLowerCase() === "x") {
+        if (ui.phase === "plan") {
+          ev.preventDefault();
+          clearSlots();
+        }
+      } else if (ev.key === "Enter") {
+        if (ui.screen === "menu") startMatch();
+        else if (ui.screen === "over") requestRematch();
+        else if (ui.phase === "plan") fight();
+      } else if (ev.key === "Escape") {
+        if (ui.screen === "play") togglePause();
+      } else if (ev.key.toLowerCase() === "m") {
+        toggleMute();
+      } else if (ev.key.toLowerCase() === "n") {
+        toggleMusic();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectHandDie, clearSlots, fight, startMatch, requestRematch, togglePause, toggleMute, toggleMusic, ui.phase, ui.screen]);
+
+  const enemyMeta = PERSONALITIES[ui.personality];
+  const inGame = ui.screen !== "menu";
+
+  const planning = ui.phase === "plan";
+  const planDisplay: (Action | null)[] = planning
+    ? slots.map((i) => (i === null ? null : ui.playerHand[i] ?? null))
+    : ui.playerPlan;
+  const badgeFor = (handIdx: number) => {
+    const at = slots.indexOf(handIdx);
+    return at >= 0 ? at + 1 : null;
+  };
+
+  return (
+    <div
+      className="flex flex-col arena-bg scanlines relative overflow-hidden"
+      style={
+        zoomOk
+          ? { zoom: fit, width: `${100 / fit}vw`, height: `${100 / fit}vh` }
+          : {
+              transform: `scale(${fit})`,
+              transformOrigin: "top left",
+              width: `${100 / fit}vw`,
+              height: `${100 / fit}vh`,
+            }
+      }
+    >
+      {/* ---------- top HUD ---------- */}
+      <header className="relative z-20 flex items-center justify-between gap-2 px-2 sm:px-4 md:px-6 py-1.5 md:py-2 border-b-[3px] border-[#070919] bg-[#151a33]/95">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-pixel text-[9px] md:text-[11px] text-gold whitespace-nowrap">РОНИН</span>
+          <Pips hp={ui.pHp} />
+        </div>
+        <div className="text-center leading-tight">
+          <span className="block font-pixel text-[9px] md:text-[11px] text-paper">
+            РАУНД <span className="text-gold">{ui.round}</span>
+          </span>
+          <span className="block font-body text-[9px] md:text-[10px] text-dim">{PHASE_LABEL[ui.phase]}</span>
+        </div>
+        <div className="flex items-center gap-2 min-w-0">
+          <Pips hp={ui.eHp} right />
+          <span
+            className="font-pixel text-[9px] md:text-[11px] whitespace-nowrap"
+            style={{ color: ui.mode === "net" ? "#e63946" : enemyMeta.color }}
+          >
+            {ui.mode === "net" ? (ui.netPeer ?? "СОПЕРНИК") : enemyMeta.name}
+          </span>
+          <span className="hidden sm:flex items-center gap-1 ml-1">
+            <button onClick={toggleMute} className="px-btn w-8 h-8 bg-panel text-paper flex items-center justify-center" aria-label="звук">
+              {muted ? <IconMute className="w-4 h-4" /> : <IconSound className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={toggleMusic}
+              className="px-btn w-8 h-8 bg-panel flex items-center justify-center"
+              aria-label="музыка"
+              title="Музыка [N]"
+            >
+              <IconMusic className={`w-4 h-4 ${music ? "text-gold" : "text-[#39406e]"}`} />
+            </button>
+            {inGame && (
+              <>
+                <button onClick={togglePause} className="px-btn w-8 h-8 bg-panel text-paper flex items-center justify-center" aria-label="пауза">
+                  <IconPause className="w-4 h-4" />
+                </button>
+                <button onClick={quitToMenu} className="px-btn w-8 h-8 bg-panel text-paper flex items-center justify-center" aria-label="в меню">
+                  <IconHome className="w-4 h-4" />
+                </button>
+              </>
+            )}
+          </span>
+        </div>
+      </header>
+
+      {/* ---------- arena ---------- */}
+      <main className="relative z-10 flex-1 min-h-0 flex items-center justify-center p-1.5 sm:p-2 md:p-3">
+        <div
+          className="relative max-w-[1080px] px-panel p-1 sm:p-1.5 bg-[#0a0d1d]"
+          style={{ width: "min(100%, calc((100dvh - 310px) * 1.7778), 1080px)" }}
+        >
+          <canvas ref={canvasRef} className="block w-full h-auto [image-rendering:pixelated]" />
+          {ui.banner && (
+            <div key={ui.bannerId} className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span
+                className="anim-slam font-pixel text-[24px] sm:text-[34px] md:text-[46px] text-paper"
+                style={{ textShadow: "4px 4px 0 #070919, -2px -2px 0 #070919, 2px -2px 0 #070919, -2px 2px 0 #070919" }}
+              >
+                {ui.banner}
+              </span>
+            </div>
+          )}
+          {paused && ui.screen === "play" && (
+            <div className="absolute inset-0 z-30 bg-[#070919]/80 flex flex-col items-center justify-center gap-4 anim-overlay">
+              <p className="font-pixel text-[24px] md:text-[32px] text-paper" style={{ textShadow: "4px 4px 0 #000" }}>
+                ПАУЗА
+              </p>
+              <button onClick={togglePause} className="px-btn px-6 py-3 bg-gold text-[#070919] text-[11px]">
+                ПРОДОЛЖИТЬ
+              </button>
+              <button onClick={quitToMenu} className="px-btn px-6 py-3 bg-panel text-paper text-[11px]">
+                ПОКИНУТЬ ПОМОСТ
+              </button>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ---------- console ---------- */}
+      <footer className="relative z-20 border-t-[3px] border-[#070919] bg-[#151a33]/95 px-2 sm:px-4 md:px-6 py-1.5 md:py-2">
+        {inGame && (ui.phase === "plan" || ui.phase === "thinking") && (
+          <div className="mx-auto max-w-5xl">
+            <div className="flex items-center justify-between gap-3 min-h-[18px] mb-1.5">
+              <p key={ui.msgId} className="anim-msg font-body text-[11px] md:text-[12px] text-dim truncate">
+                <span className="text-gold">▸</span> {ui.msg}
+              </p>
+              <p className="hidden md:block font-body text-[10px] text-dim/60 whitespace-nowrap">
+                [1–6] взять кубик · [⌫] сброс · [Enter] бой
+              </p>
+            </div>
+
+            {ui.mode === "net" && ui.phase === "plan" && (
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="font-pixel text-[8px] text-dim whitespace-nowrap">ВРЕМЯ</span>
+                <div className="flex-1 h-3 border-2 border-[#070919] bg-ink2 relative overflow-hidden">
+                  <div
+                    className="absolute inset-y-0 left-0 transition-[width] duration-100 ease-linear"
+                    style={{
+                      width: `${(timeLeft / 20) * 100}%`,
+                      background:
+                        timeLeft > 10 ? "#2a9d8f" : timeLeft > 5 ? "#e9c46a" : "#e63946",
+                    }}
+                  />
+                  <div className="absolute inset-0 opacity-30 pointer-events-none" style={{
+                    backgroundImage:
+                      "repeating-linear-gradient(90deg, transparent 0 9px, #070919 9px 10px)",
+                  }} />
+                </div>
+                <span
+                  className={`font-pixel text-[11px] w-8 text-right ${
+                    timeLeft <= 5 ? "text-blood anim-blink" : "text-paper"
+                  }`}
+                >
+                  {Math.ceil(timeLeft)}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1.5 md:gap-2">
+              {/* ---- PLAYER: hand -> plan ---- */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 md:gap-x-3">
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold w-12 text-right whitespace-nowrap">ВЫ<br />
+                  <span className="text-[6px] text-dim">рука</span>
+                </span>
+                <div key={`ph-${ui.round}`} className="flex items-center gap-1">
+                  {ui.playerHand.map((a, i) => (
+                    <HandDie
+                      key={i}
+                      action={a}
+                      badge={planning ? badgeFor(i) : null}
+                      dimmed={planning && !slots.includes(i)}
+                      onClick={planning ? () => selectHandDie(i) : undefined}
+                      delay={i * 55}
+                      hotkey={planning ? i + 1 : undefined}
+                    />
+                  ))}
+                </div>
+                <span className="font-pixel text-[10px] text-dim px-0.5">→</span>
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold whitespace-nowrap">план</span>
+                <div className="flex items-center gap-1">
+                  {planDisplay.map((a, i) =>
+                    a ? (
+                      <div key={`${ui.round}-${i}-${a}`} className="anim-pop">
+                        <HandDie
+                          action={a}
+                          badge={i + 1}
+                          roll={false}
+                          onClick={planning && slots[i] !== null ? () => selectHandDie(slots[i] as number) : undefined}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        key={`pe-${i}`}
+                        className="w-10 h-12 sm:w-11 sm:h-[52px] border-2 border-dashed border-[#39406e] bg-ink2 flex items-center justify-center"
+                      >
+                        <span className="font-pixel text-[8px] text-[#39406e]">{i + 1}</span>
+                      </div>
+                    )
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 ml-1">
+                  <button
+                    onClick={fight}
+                    disabled={!ready || !planning}
+                    className="px-btn no-select px-4 md:px-5 py-2.5 md:py-3 bg-blood text-paper text-[11px] md:text-[12px] tracking-widest"
+                  >
+                    БОЙ!
+                  </button>
+                  <button
+                    onClick={clearSlots}
+                    className="px-btn no-select px-2 py-2.5 bg-panel text-dim text-[8px]"
+                    disabled={!planning}
+                  >
+                    СБРОС
+                  </button>
+                </div>
+              </div>
+
+              {/* ---- ENEMY: hand -> hidden plan ---- */}
+              <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 md:gap-x-3">
+                <span
+                  className="font-pixel text-[8px] md:text-[9px] w-12 text-right whitespace-nowrap"
+                  style={{ color: enemyMeta.color }}
+                >
+                  {enemyMeta.name}
+                  <br />
+                  <span className="text-[6px] text-dim">рука</span>
+                </span>
+                <div key={`eh-${ui.round}`} className="flex items-center gap-1">
+                  {ui.enemyHand.map((a, i) => (
+                    <HandDie key={i} action={a} enemy delay={i * 55 + 40} />
+                  ))}
+                </div>
+                <span className="font-pixel text-[10px] text-dim px-0.5">→</span>
+                <span className="font-pixel text-[8px] md:text-[9px] whitespace-nowrap" style={{ color: enemyMeta.color }}>
+                  замысел
+                </span>
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="die w-10 h-12 sm:w-11 sm:h-[52px] flex items-center justify-center anim-dice-roll"
+                      style={{ background: "#3a1020", animationDelay: `${i * 55 + 200}ms` }}
+                    >
+                      <span className="font-pixel text-blood opacity-70" style={{ fontSize: 12 }}>
+                        ?
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {inGame && (ui.phase === "resolve" || ui.phase === "ko") && (
+          <div className="mx-auto max-w-4xl">
+            <div className="flex items-center justify-between gap-3 min-h-[18px] mb-1">
+              <p key={ui.msgId} className="anim-msg font-body text-[11px] md:text-[12px] text-dim truncate">
+                <span className="text-gold">▸</span> {ui.msg}
+              </p>
+              {ui.phase === "resolve" && (
+                <span className="font-pixel text-[9px] md:text-[10px] text-gold whitespace-nowrap">
+                  ШАГ {Math.min(3, ui.step + 1)}/3
+                </span>
+              )}
+            </div>
+            <div className="flex items-start justify-center gap-3 md:gap-10">
+              <div className="flex items-start gap-1.5 md:gap-2">
+                <span className="font-pixel text-[8px] md:text-[9px] text-gold mr-1 mt-3 sm:mt-4 whitespace-nowrap">ВЫ</span>
+                {ui.playerPlan.map((a, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <FlipDie action={a} revealed big active={ui.step === i} done={ui.step > i} />
+                    <span
+                      className={`font-pixel leading-none ${ui.step === i ? "text-gold" : "text-[#39406e]"}`}
+                      style={{ fontSize: 8 }}
+                    >
+                      {i + 1}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <span className="font-pixel text-[12px] md:text-[14px] text-blood mt-4 sm:mt-6">VS</span>
+              <div className="flex items-start gap-1.5 md:gap-2">
+                {ui.enemyPlan.map((a, i) => (
+                  <div key={i} className="flex flex-col items-center gap-1">
+                    <FlipDie
+                      action={a}
+                      revealed={i < ui.enemyRevealed}
+                      big
+                      active={ui.step === i}
+                      done={ui.step > i}
+                      backColor="#3a1020"
+                    />
+                    <span
+                      className={`font-pixel leading-none ${ui.step === i ? "text-blood" : "text-[#39406e]"}`}
+                      style={{ fontSize: 8 }}
+                    >
+                      {i + 1}
+                    </span>
+                  </div>
+                ))}
+                <span
+                  className="font-pixel text-[8px] md:text-[9px] ml-1 mt-3 sm:mt-4 whitespace-nowrap"
+                  style={{ color: enemyMeta.color }}
+                >
+                  {enemyMeta.name}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {ui.screen === "menu" && (
+          <p className="text-center font-pixel text-[8px] md:text-[9px] text-dim py-1">
+            ПОМОСТ ЖДЁТ <span className="text-blood anim-blink">▮</span>
+          </p>
+        )}
+      </footer>
+
+      {/* ---------- overlays ---------- */}
+      {ui.screen === "menu" && (
+        <MenuScreen
+          pers={pers}
+          setPers={setPers}
+          onStart={startMatch}
+          onGauntlet={startGauntlet}
+          goldenUnlocked={goldenUnlocked}
+          goldenEquip={goldenEquip}
+          onToggleGolden={toggleGoldenEquip}
+          netPanel={{
+            state: netState,
+            ip: ipAddr,
+            setIp: setIpAddr,
+            error: netError,
+            transport: netTransport,
+            setTransport: setNetTransport,
+            onCreate: createRoom,
+            onConnectLan: connectLan,
+            onCancel: cancelNet,
+            invite: inviteCode,
+            answer: answerCode,
+            inviteInput,
+            setInviteInput,
+            answerInput,
+            setAnswerInput,
+            onGuestStart: guestStart,
+            onAcceptAnswer: acceptAnswer,
+            onMakeAnswer: makeAnswer,
+            copied,
+            onCopy: copyText,
+          }}
+        />
+      )}
+      {ui.screen === "over" && ui.result && (
+        <OverScreen
+          result={ui.result}
+          stats={ui.stats}
+          enemyName={
+            ui.mode === "net"
+              ? peerKind
+                ? FIGHTER_OPTIONS.find((o) => o.kind === peerKind)?.name ?? "Соперник"
+                : "Соперник"
+              : enemyMeta.name
+          }
+          onRematch={ui.mode === "net" ? requestRematch : startMatch}
+          onMenu={quitToMenu}
+          onLobby={ui.mode === "net" ? returnToLobby : undefined}
+          rematchLabel={
+            ui.mode === "net"
+              ? rematchSent
+                ? oppWantsRematch
+                  ? "РЕВАНШ!"
+                  : "ЖДЁМ СОПЕРНИКА…"
+                : oppWantsRematch
+                  ? "СОПЕРНИК ЖДЁТ — РЕВАНШ!"
+                  : "ПРЕДЛОЖИТЬ РЕВАНШ"
+              : "РЕВАНШ"
+          }
+        />
+      )}
+
+      {/* ---- «Путь героя» ---- */}
+      {ui.screen === "g_rest" && (
+        <GauntletRest index={ui.gauntletIndex} healed={ui.gauntletHealed} pHp={ui.pHp} onNext={continueGauntlet} />
+      )}
+      {ui.screen === "g_done" && <GauntletDone onMenu={quitToMenu} onAgain={startGauntlet} />}
+      {ui.screen === "g_over" && (
+        <GauntletOver index={ui.gauntletIndex} stats={ui.stats} onRetry={startGauntlet} onMenu={quitToMenu} />
+      )}
+
+      {/* лобби выбора бойца (сетевая игра) */}
+      {lobby && netState === "connected" && (
+        <LobbyScreen
+          myKind={myKind}
+          peerKind={peerKind}
+          peerName={netPeerName}
+          goldenUnlocked={goldenUnlocked}
+          onPick={pickKind}
+          onStart={startFromLobby}
+        />
+      )}
+
+      {/* уведомление о разрыве соединения */}
+      {netDrop && ui.screen === "menu" && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 px-panel bg-[#3a1020] px-4 py-2 anim-rise">
+          <p className="font-pixel text-[9px] text-blood">СОПЕРНИК ПОКИНУЛ ПОМОСТ</p>
+        </div>
+      )}
+    </div>
+  );
+}
