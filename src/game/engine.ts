@@ -26,7 +26,7 @@ const TILE_H = 30;
 export const tileCenter = (i: number) => ARENA_X + i * TILE_W + TILE_W / 2;
 
 export interface UiSnapshot {
-  screen: "menu" | "play" | "over";
+  screen: "menu" | "play" | "over" | "lobby";
   phase: "idle" | "plan" | "thinking" | "resolve" | "ko";
   personality: Personality;
   mode: "ai" | "net";
@@ -361,6 +361,36 @@ export class Engine {
     });
     this.say(`Сетевая дуэль с игроком ${peerName}. На план — 20 секунд!`);
     this.startExchange(tok);
+  }
+
+  /** Возврат в лобби выбора бойца: соединение и выбранные бойцы сохраняются, матч сбрасывается. */
+  backToLobby() {
+    ++this.token; // отменяем все отложенные таймеры доигранного матча
+    this.p = mkFighter(PLAYER_START, 1);
+    this.e = mkFighter(ENEMY_START, -1);
+    this.particles = [];
+    this.round = 1;
+    this.stats = freshStats();
+    this.netEnemyHand = [];
+    this.netEnemyPlan = null;
+    this.planCommitted = false;
+    this.slow = 1;
+    this.patch({
+      screen: "lobby",
+      phase: "idle",
+      round: 1,
+      pHp: MAX_HP,
+      eHp: MAX_HP,
+      step: -1,
+      enemyRevealed: 0,
+      enemyPlan: [null, null, null],
+      playerPlan: [null, null, null],
+      playerHand: [],
+      enemyHand: [],
+      result: null,
+      banner: null,
+      stats: { ...this.stats },
+    });
   }
 
   fight(plan: Action[]) {

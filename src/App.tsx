@@ -630,6 +630,7 @@ function OverScreen({
   enemyName,
   onRematch,
   onMenu,
+  onLobby,
   rematchLabel = "РЕВАНШ",
 }: {
   result: GameResult;
@@ -637,6 +638,7 @@ function OverScreen({
   enemyName: string;
   onRematch: () => void;
   onMenu: () => void;
+  onLobby?: () => void;
   rematchLabel?: string;
 }) {
   const map = {
@@ -666,14 +668,39 @@ function OverScreen({
             <StatCell v={stats.leaps} label="прыжки" color="#3ddad7" />
             <StatCell v={stats.dealt - stats.taken} label="разница" color="#3ddad7" />
           </div>
-          <div className="flex gap-2">
-            <button onClick={onRematch} className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2">
-              <IconRetry className="w-4 h-4" /> {rematchLabel}
-            </button>
-            <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px] flex items-center justify-center gap-2">
-              <IconHome className="w-4 h-4" /> В МЕНЮ
-            </button>
-          </div>
+          {onLobby ? (
+            <>
+              <div className="flex gap-2">
+                <button
+                  onClick={onLobby}
+                  className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2"
+                >
+                  <IconHome className="w-4 h-4" /> В ЛОББИ
+                </button>
+                <button
+                  onClick={onRematch}
+                  className="px-btn no-select flex-1 py-3 bg-[#0e6b69] text-paper text-[10px] md:text-[12px] flex items-center justify-center gap-2"
+                >
+                  <IconRetry className="w-4 h-4" /> {rematchLabel}
+                </button>
+              </div>
+              <button
+                onClick={onMenu}
+                className="px-btn no-select w-full mt-2 py-2 bg-panel text-dim text-[9px] flex items-center justify-center gap-2"
+              >
+                В МЕНЮ · РАЗЪЕДИНИТЬ
+              </button>
+            </>
+          ) : (
+            <div className="flex gap-2">
+              <button onClick={onRematch} className="px-btn no-select flex-1 py-3 bg-gold text-[#070919] text-[10px] md:text-[12px] flex items-center justify-center gap-2">
+                <IconRetry className="w-4 h-4" /> {rematchLabel}
+              </button>
+              <button onClick={onMenu} className="px-btn no-select flex-1 py-3 bg-panel text-paper text-[12px] flex items-center justify-center gap-2">
+                <IconHome className="w-4 h-4" /> В МЕНЮ
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -968,6 +995,15 @@ export default function App() {
           setOppWantsRematch(true);
           sfx.select();
           if (myRematchRef.current) beginNetMatch();
+        } else if (m.t === "lobby") {
+          // соперник вернулся в лобби — последуем за ним, соединение живёт
+          setNetDrop(false);
+          setLobby(true);
+          myRematchRef.current = false;
+          oppRematchRef.current = false;
+          setOppWantsRematch(false);
+          setRematchSent(false);
+          engine.backToLobby();
         } else if (m.t === "quit") {
           if (uiRef.current.screen !== "menu") {
             engine.toMenu();
@@ -1196,6 +1232,21 @@ export default function App() {
     net.send({ t: "rematch" });
     if (oppRematchRef.current) beginNetMatch();
   }, [startMatch, beginNetMatch]);
+
+  /** Вернуться в лобби выбора бойца, НЕ разрывая соединение. */
+  const returnToLobby = useCallback(() => {
+    if (uiRef.current.mode !== "net") return;
+    initAudio();
+    sfx.select();
+    myRematchRef.current = false;
+    oppRematchRef.current = false;
+    setOppWantsRematch(false);
+    setRematchSent(false);
+    setNetDrop(false);
+    setLobby(true);
+    engine.backToLobby();
+    net.send({ t: "lobby" });
+  }, [engine]);
 
   const toggleMute = useCallback(() => {
     initAudio();
@@ -1590,6 +1641,7 @@ export default function App() {
           }
           onRematch={ui.mode === "net" ? requestRematch : startMatch}
           onMenu={quitToMenu}
+          onLobby={ui.mode === "net" ? returnToLobby : undefined}
           rematchLabel={
             ui.mode === "net"
               ? rematchSent

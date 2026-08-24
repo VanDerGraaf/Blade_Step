@@ -18,6 +18,7 @@ export type NetMsg =
   | { t: "hand"; hand: string[] }
   | { t: "plan"; plan: string[] }
   | { t: "rematch" }
+  | { t: "lobby" }
   | { t: "quit" };
 
 export interface NetHooks {
