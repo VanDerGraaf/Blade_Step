@@ -1,4 +1,5 @@
 extends Node
+class_name BAudio
 ## Blade Step — 8-битный звук и музыка. Автолоад «Audio8».
 ## Порт src/game/audio.ts. Вместо WebAudio-осцилляторов все звуки ПРЕДРЕНДЕРЯТСЯ
 ## в PCM (AudioStreamWAV, 22050 Гц, моно) один раз при старте — дальше просто play().
@@ -6,9 +7,11 @@ extends Node
 ##
 ## TODO (движок): для идеальных петлевых бэкграундов можно вынести музыку в .ogg;
 ## текущий пред-рендер не требует никаких ассетов и звучит 1-в-1 как веб-версия.
+##
+## Примечание: встроенную глобальную константу TAU (2π) затенять нельзя —
+## используется она, своей константы нет.
 
 const RATE := 22050
-const TAU := 6.28318530718
 
 var muted := false
 var music_on := true
@@ -78,15 +81,15 @@ class Baker:
 				break
 			var t := float(i) / n
 			var f := f0 * pow(f1 / f0, t) if f1 > 0.0 else f0
-			phase += BAudio.TAU * f / BAudio.RATE
+			phase += TAU * f / BAudio.RATE
 			var s := 0.0
 			match type:
 				"square":
 					s = 1.0 if sin(phase) >= 0.0 else -1.0
 				"sawtooth":
-					s = 2.0 * fmod(phase / BAudio.TAU, 1.0) - 1.0
+					s = 2.0 * fmod(phase / TAU, 1.0) - 1.0
 				"triangle":
-					s = 2.0 * absf(2.0 * fmod(phase / BAudio.TAU, 1.0) - 1.0) - 1.0
+					s = 2.0 * absf(2.0 * fmod(phase / TAU, 1.0) - 1.0) - 1.0
 				_: # sine
 					s = sin(phase)
 			# огибающая: быстрая атака, экспоненциальный спад
@@ -108,15 +111,15 @@ class Baker:
 			var x := randf() * 2.0 - 1.0
 			match filter:
 				"lowpass":
-					var a := 1.0 - exp(-BAudio.TAU * f / BAudio.RATE)
+					var a := 1.0 - exp(-TAU * f / BAudio.RATE)
 					y += a * (x - y)
 				"highpass":
-					var a := exp(-BAudio.TAU * f / BAudio.RATE)
+					var a := exp(-TAU * f / BAudio.RATE)
 					y = a * (y + x - prev_x)
 				"bandpass":
-					var a1 := 1.0 - exp(-BAudio.TAU * f * q / BAudio.RATE)
+					var a1 := 1.0 - exp(-TAU * f * q / BAudio.RATE)
 					y += a1 * (x - y)
-					var a2 := exp(-BAudio.TAU * maxf(f * 0.4, 30.0) / BAudio.RATE)
+					var a2 := exp(-TAU * maxf(f * 0.4, 30.0) / BAudio.RATE)
 					y = a2 * (y + x - prev_x)
 				_:
 					y = x
@@ -223,17 +226,21 @@ func _build_sfx() -> void:
 		],
 		"tick": [["tone", "square", 880, 880, 0.04, 0.07, 0.0]],
 	}
-	for name in defs:
+	for nm in defs:
 		var total := 0.0
-		for ev in defs[name]:
-			total = maxf(total, float(ev[ev.size() - 2]) + float(ev[3]))
+		for ev in defs[nm]:
+			# tone: [тип, волна, f0, f1, длительность, громкость, задержка]
+			# noise: [тип, длительность, громкость, фильтр, f0, f1, задержка, q]
+			var dur := float(ev[4]) if ev[0] == "tone" else float(ev[1])
+			var delay := float(ev[6])
+			total = maxf(total, delay + dur)
 		var b := Baker.new(total + 0.15)
-		for ev in defs[name]:
+		for ev in defs[nm]:
 			if ev[0] == "tone":
 				b.add_tone(ev[1], ev[2], ev[3], ev[4], ev[5], ev[6])
 			else:
 				b.add_noise(ev[1], ev[2], ev[3], ev[4], ev[5], ev[6], ev[7])
-		_streams[name] = b.bake()
+		_streams[nm] = b.bake()
 
 
 func _unlock_score() -> Array:
@@ -317,15 +324,15 @@ func _hat(b: Baker, t0: float, vol: float) -> void:
 
 # ---- публичное API ----------------------------------------------------------
 
-func play(name: String) -> void:
-	if muted or not _streams.has(name):
+func play(sfx_name: String) -> void:
+	if muted or not _streams.has(sfx_name):
 		return
 	for p in _players:
 		if not p.playing:
-			p.stream = _streams[name]
+			p.stream = _streams[sfx_name]
 			p.play()
 			return
-	_players[0].stream = _streams[name]
+	_players[0].stream = _streams[sfx_name]
 	_players[0].play()
 
 
